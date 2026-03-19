@@ -2989,6 +2989,9 @@ SYSCALL_DEFINE5(prctl, int, option, unsigned long, arg2, unsigned long, arg3,
 				break;
 			}
 		}
+		
+		if (error)
+			break;
 
 		if (!smp_load_acquire(&mm->repl_pgd_enabled)) {
 			error = -EINVAL;
@@ -3001,6 +3004,9 @@ SYSCALL_DEFINE5(prctl, int, option, unsigned long, arg2, unsigned long, arg3,
 				break;
 			}
 		}
+		
+		if (error)
+			break;
 
 		{
 			nodemask_t changed;
