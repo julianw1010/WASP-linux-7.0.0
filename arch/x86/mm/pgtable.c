@@ -6,6 +6,7 @@
 #include <asm/tlb.h>
 #include <asm/fixmap.h>
 #include <asm/mtrr.h>
+#include <asm/pgtable_repl.h>
 
 #ifdef CONFIG_DYNAMIC_PHYSICAL_MASK
 phys_addr_t physical_mask __ro_after_init = (1ULL << __PHYSICAL_MASK_SHIFT) - 1;
@@ -446,13 +447,7 @@ int pudp_set_access_flags(struct vm_area_struct *vma, unsigned long address,
 int ptep_test_and_clear_young(struct vm_area_struct *vma,
 			      unsigned long addr, pte_t *ptep)
 {
-	int ret = 0;
-
-	if (pte_young(*ptep))
-		ret = test_and_clear_bit(_PAGE_BIT_ACCESSED,
-					 (unsigned long *) &ptep->pte);
-
-	return ret;
+	return pgtable_repl_ptep_test_and_clear_young(vma, addr, ptep);
 }
 
 #if defined(CONFIG_TRANSPARENT_HUGEPAGE) || defined(CONFIG_ARCH_HAS_NONLEAF_PMD_YOUNG)

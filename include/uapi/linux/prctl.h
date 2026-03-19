@@ -423,4 +423,9 @@ struct prctl_mm_map {
  */
 #define PR_LOCK_INDIR_BR_LP_STATUS      82
 
+#define PR_SET_PGTABLE_REPL		100
+#define PR_GET_PGTABLE_REPL		101
+#define PR_SET_PGTABLE_REPL_STEERING	104
+#define PR_GET_PGTABLE_REPL_STEERING	105
+
 #endif /* _LINUX_PRCTL_H */

@@ -78,6 +78,8 @@
 
 #include <trace/events/sched.h>
 
+#include <asm/pgtable_repl.h>
+
 /* For vma exec functions. */
 #include "../mm/internal.h"
 
@@ -1455,8 +1457,16 @@ static struct linux_binprm *alloc_bprm(int fd, struct filename *filename, int fl
 	bprm->is_check = !!(flags & AT_EXECVE_CHECK);
 
 	retval = bprm_mm_init(bprm);
-	if (!retval)
-		return bprm;
+	if (retval)
+		goto out_free;
+
+	if (current->mm && current->mm->repl_pgd_enabled &&
+	    !nodes_empty(current->mm->repl_pgd_nodes)) {
+		bprm->mm->repl_pending_enable = true;
+		bprm->mm->repl_pending_nodes = current->mm->repl_pgd_nodes;
+	}
+
+	return bprm;
 
 out_free:
 	free_bprm(bprm);
@@ -1756,6 +1766,11 @@ static int bprm_execve(struct linux_binprm *bprm)
 	user_events_execve(current);
 	acct_update_integrals(current);
 	task_numa_free(current, false);
+	if (current->mm && current->mm->repl_pending_enable) {
+		pgtable_repl_enable(current->mm, current->mm->repl_pending_nodes);
+		current->mm->repl_pending_enable = false;
+		nodes_clear(current->mm->repl_pending_nodes);
+	}
 	return retval;
 
 out:

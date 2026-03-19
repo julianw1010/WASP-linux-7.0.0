@@ -3543,6 +3543,7 @@ static inline bool pagetable_pte_ctor(struct mm_struct *mm,
 	if (mm != &init_mm && !ptlock_init(ptdesc))
 		return false;
 	__pagetable_ctor(ptdesc);
+	ptdesc->pt_replica = NULL;
 	return true;
 }
 
@@ -3635,6 +3636,7 @@ static inline bool pagetable_pmd_ctor(struct mm_struct *mm,
 		return false;
 	ptdesc_pmd_pts_init(ptdesc);
 	__pagetable_ctor(ptdesc);
+	ptdesc->pt_replica = NULL;
 	return true;
 }
 
@@ -3660,16 +3662,19 @@ static inline spinlock_t *pud_lock(struct mm_struct *mm, pud_t *pud)
 static inline void pagetable_pud_ctor(struct ptdesc *ptdesc)
 {
 	__pagetable_ctor(ptdesc);
+	ptdesc->pt_replica = NULL;
 }
 
 static inline void pagetable_p4d_ctor(struct ptdesc *ptdesc)
 {
 	__pagetable_ctor(ptdesc);
+	ptdesc->pt_replica = NULL;
 }
 
 static inline void pagetable_pgd_ctor(struct ptdesc *ptdesc)
 {
 	__pagetable_ctor(ptdesc);
+	ptdesc->pt_replica = NULL;
 }
 
 extern void __init pagecache_init(void);

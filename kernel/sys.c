@@ -78,6 +78,8 @@
 
 #include <trace/events/task.h>
 
+#include <asm/pgtable_repl.h>
+
 #include "uid16.h"
 
 #ifndef SET_UNALIGN_CTL
@@ -2903,6 +2905,141 @@ SYSCALL_DEFINE5(prctl, int, option, unsigned long, arg2, unsigned long, arg3,
 			return -EINVAL;
 		error = arch_lock_indir_br_lp_status(me, arg2);
 		break;
+	case PR_SET_PGTABLE_REPL:
+	{
+		nodemask_t nodes;
+		struct mm_struct *mm = current->mm;
+		int node;
+
+		if (!mm || current->pid == 1) {
+			error = -EINVAL;
+			break;
+		}
+
+		if (arg2 == 0) {
+			if (mm->repl_pgd_enabled)
+				pgtable_repl_disable(mm);
+			error = 0;
+			break;
+		}
+
+		if (num_online_nodes() <= 1) {
+			error = -EINVAL;
+			break;
+		}
+
+		if (arg2 == 1) {
+			nodes = node_online_map;
+		} else {
+			nodes_clear(nodes);
+			for (node = 0; node < min(NUMA_NODE_COUNT, (int)BITS_PER_LONG); node++) {
+				if (arg2 & (1UL << node)) {
+					if (!node_online(node)) {
+						error = -EINVAL;
+						break;
+					}
+					node_set(node, nodes);
+				}
+			}
+			if (nodes_weight(nodes) < 2) {
+				error = -EINVAL;
+				break;
+			}
+		}
+
+		error = pgtable_repl_enable(mm, nodes);
+		break;
+	}
+	case PR_GET_PGTABLE_REPL:
+	{
+		unsigned long mask = 0;
+		int node;
+
+		if (current->mm && current->mm->repl_pgd_enabled) {
+			for_each_node_mask(node, current->mm->repl_pgd_nodes) {
+				if (node < BITS_PER_LONG)
+					mask |= (1UL << node);
+			}
+			error = (long)mask;
+		} else {
+			error = 0;
+		}
+		break;
+	}
+	case PR_SET_PGTABLE_REPL_STEERING:
+	{
+		struct mm_struct *mm = current->mm;
+		int steering[NUMA_NODE_COUNT];
+		int __user *user_steering = (int __user *)arg2;
+		int i;
+
+		if (!mm || !user_steering) {
+			error = -EINVAL;
+			break;
+		}
+
+		if (copy_from_user(steering, user_steering, sizeof(steering))) {
+			error = -EFAULT;
+			break;
+		}
+
+		for (i = 0; i < NUMA_NODE_COUNT; i++) {
+			if (steering[i] < -1 || steering[i] >= NUMA_NODE_COUNT) {
+				error = -EINVAL;
+				break;
+			}
+		}
+
+		if (!smp_load_acquire(&mm->repl_pgd_enabled)) {
+			error = -EINVAL;
+			break;
+		}
+
+		for (i = 0; i < NUMA_NODE_COUNT; i++) {
+			if (steering[i] >= 0 && !mm->pgd_replicas[steering[i]]) {
+				error = -EINVAL;
+				break;
+			}
+		}
+
+		{
+			nodemask_t changed;
+			nodes_clear(changed);
+			for (i = 0; i < NUMA_NODE_COUNT; i++) {
+				if (READ_ONCE(mm->repl_steering[i]) != steering[i]) {
+					WRITE_ONCE(mm->repl_steering[i], steering[i]);
+					node_set(i, changed);
+				}
+			}
+			smp_wmb();
+			if (!nodes_empty(changed))
+				pgtable_repl_force_steering_switch(mm, &changed);
+		}
+
+		error = 0;
+		break;
+	}
+	case PR_GET_PGTABLE_REPL_STEERING:
+	{
+		struct mm_struct *mm = current->mm;
+		int steering[NUMA_NODE_COUNT];
+		int __user *user_steering = (int __user *)arg2;
+		int i;
+
+		if (!mm || !user_steering) {
+			error = -EINVAL;
+			break;
+		}
+
+		for (i = 0; i < NUMA_NODE_COUNT; i++)
+			steering[i] = READ_ONCE(mm->repl_steering[i]);
+
+		if (copy_to_user(user_steering, steering, sizeof(steering)))
+			error = -EFAULT;
+		else
+			error = 0;
+		break;
+	}
 	default:
 		trace_task_prctl_unknown(option, arg2, arg3, arg4, arg5);
 		error = -EINVAL;

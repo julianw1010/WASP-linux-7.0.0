@@ -5,6 +5,9 @@
 #include <linux/mem_encrypt.h>
 #include <asm/page.h>
 #include <asm/pgtable_types.h>
+#ifndef __ASSEMBLY__
+#include <asm/pgtable_repl.h>
+#endif
 
 /*
  * Macro to mark a page protection value as UC-
@@ -1249,29 +1252,20 @@ extern int ptep_clear_flush_young(struct vm_area_struct *vma,
 
 #define __HAVE_ARCH_PTEP_GET_AND_CLEAR
 static inline pte_t ptep_get_and_clear(struct mm_struct *mm, unsigned long addr,
-				       pte_t *ptep)
+                                       pte_t *ptep)
 {
-	pte_t pte = native_ptep_get_and_clear(ptep);
+	pte_t pte = pgtable_repl_ptep_get_and_clear(mm, ptep);
 	page_table_check_pte_clear(mm, addr, pte);
 	return pte;
 }
 
 #define __HAVE_ARCH_PTEP_GET_AND_CLEAR_FULL
 static inline pte_t ptep_get_and_clear_full(struct mm_struct *mm,
-					    unsigned long addr, pte_t *ptep,
-					    int full)
+                                            unsigned long addr, pte_t *ptep,
+                                            int full)
 {
-	pte_t pte;
-	if (full) {
-		/*
-		 * Full address destruction in progress; paravirt does not
-		 * care about updates and native needs no locking
-		 */
-		pte = native_local_ptep_get_and_clear(ptep);
-		page_table_check_pte_clear(mm, addr, pte);
-	} else {
-		pte = ptep_get_and_clear(mm, addr, ptep);
-	}
+	pte_t pte = pgtable_repl_ptep_get_and_clear(mm, ptep);
+	page_table_check_pte_clear(mm, addr, pte);
 	return pte;
 }
 
@@ -1279,19 +1273,8 @@ static inline pte_t ptep_get_and_clear_full(struct mm_struct *mm,
 static inline void ptep_set_wrprotect(struct mm_struct *mm,
 				      unsigned long addr, pte_t *ptep)
 {
-	/*
-	 * Avoid accidentally creating shadow stack PTEs
-	 * (Write=0,Dirty=1).  Use cmpxchg() to prevent races with
-	 * the hardware setting Dirty=1.
-	 */
-	pte_t old_pte, new_pte;
-
-	old_pte = READ_ONCE(*ptep);
-	do {
-		new_pte = pte_wrprotect(old_pte);
-	} while (!try_cmpxchg((long *)&ptep->pte, (long *)&old_pte, *(long *)&new_pte));
+	pgtable_repl_ptep_set_wrprotect(mm, addr, ptep);
 }
-
 #define flush_tlb_fix_spurious_fault(vma, address, ptep) do { } while (0)
 
 #define  __HAVE_ARCH_PMDP_SET_ACCESS_FLAGS

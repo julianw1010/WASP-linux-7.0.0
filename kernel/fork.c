@@ -114,6 +114,8 @@
 #include <asm/cacheflush.h>
 #include <asm/tlbflush.h>
 
+#include <asm/pgtable_repl.h>
+
 /* For dup_mmap(). */
 #include "../mm/internal.h"
 
@@ -1072,6 +1074,7 @@ static void mmap_init_lock(struct mm_struct *mm)
 static struct mm_struct *mm_init(struct mm_struct *mm, struct task_struct *p,
 	struct user_namespace *user_ns)
 {
+	int i;
 	mt_init_flags(&mm->mm_mt, MM_MT_FLAGS);
 	mt_set_external_lock(&mm->mm_mt, &mm->mmap_lock);
 	atomic_set(&mm->mm_users, 1);
@@ -1112,6 +1115,17 @@ static struct mm_struct *mm_init(struct mm_struct *mm, struct task_struct *p,
 
 	if (futex_mm_init(mm))
 		goto fail_mm_init;
+
+	mm->repl_pgd_enabled = false;
+	mm->repl_in_progress = false;
+	nodes_clear(mm->repl_pgd_nodes);
+	mutex_init(&mm->repl_mutex);
+	memset(mm->pgd_replicas, 0, sizeof(mm->pgd_replicas));
+	mm->original_pgd = NULL;
+	mm->repl_pending_enable = false;
+	nodes_clear(mm->repl_pending_nodes);
+	for (i = 0; i < NUMA_NODE_COUNT; i++)
+		mm->repl_steering[i] = -1;
 
 	if (mm_alloc_pgd(mm))
 		goto fail_nopgd;
@@ -1193,9 +1207,13 @@ static inline void __mmput(struct mm_struct *mm)
 void mmput(struct mm_struct *mm)
 {
 	might_sleep();
-
-	if (atomic_dec_and_test(&mm->mm_users))
+	if (atomic_dec_and_test(&mm->mm_users)) {
+		if (mm->repl_pgd_enabled) {
+			synchronize_rcu();
+			pgtable_repl_disable(mm);
+		}
 		__mmput(mm);
+	}
 }
 EXPORT_SYMBOL_GPL(mmput);
 
@@ -1580,9 +1598,29 @@ static int copy_mm(u64 clone_flags, struct task_struct *tsk)
 		mmget(oldmm);
 		mm = oldmm;
 	} else {
+		bool parent_had_repl = false;
+		nodemask_t parent_nodes;
+
+		nodes_clear(parent_nodes);
+
+		if (oldmm->repl_pgd_enabled &&
+		    !nodes_empty(oldmm->repl_pgd_nodes) &&
+		    nodes_weight(oldmm->repl_pgd_nodes) >= 2) {
+			parent_had_repl = true;
+			parent_nodes = oldmm->repl_pgd_nodes;
+		}
+
 		mm = dup_mm(tsk, current->mm);
 		if (!mm)
 			return -ENOMEM;
+
+		if (parent_had_repl) {
+			pgtable_repl_enable(mm, parent_nodes);
+		} else if (sysctl_wasp_auto_enable == 1 &&
+			   !(tsk->flags & PF_KTHREAD) &&
+			   num_online_nodes() >= 2) {
+			pgtable_repl_enable(mm, node_online_map);
+		}
 	}
 
 	tsk->mm = mm;

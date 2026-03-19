@@ -219,6 +219,7 @@ struct page {
 	struct page *kmsan_shadow;
 	struct page *kmsan_origin;
 #endif
+	unsigned long _mitosis_pad;
 } _struct_page_alignment;
 
 /*
@@ -546,6 +547,8 @@ FOLIO_MATCH(flags, _flags_3);
 FOLIO_MATCH(compound_head, _head_3);
 #undef FOLIO_MATCH
 
+#define NUMA_NODE_COUNT 8
+
 /**
  * struct ptdesc -    Memory descriptor for page tables.
  * @pt_flags: enum pt_flags plus zone/node/section.
@@ -604,6 +607,7 @@ struct ptdesc {
 #ifdef CONFIG_MEMCG
 	unsigned long pt_memcg_data;
 #endif
+	struct ptdesc *pt_replica;
 };
 
 #define TABLE_MATCH(pg, pt)						\
@@ -1147,6 +1151,17 @@ struct mm_struct {
 		unsigned long mmap_compat_legacy_base;
 #endif
 		unsigned long task_size;	/* size of task vm space */
+		
+		bool repl_pgd_enabled;
+		bool repl_in_progress;
+		nodemask_t repl_pgd_nodes;
+		struct mutex repl_mutex;
+		pgd_t *pgd_replicas[NUMA_NODE_COUNT];
+		pgd_t *original_pgd;
+		int repl_steering[NUMA_NODE_COUNT];
+		bool repl_pending_enable;
+		nodemask_t repl_pending_nodes;
+		
 		pgd_t * pgd;
 
 #ifdef CONFIG_MEMBARRIER
