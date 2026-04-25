@@ -165,7 +165,9 @@ IF_HAVE_PG_HWPOISON(hwpoison)						\
 IF_HAVE_PG_IDLE(idle)							\
 IF_HAVE_PG_IDLE(young)							\
 IF_HAVE_PG_ARCH_2(arch_2)						\
-IF_HAVE_PG_ARCH_3(arch_3)
+IF_HAVE_PG_ARCH_3(arch_3)						\
+        ,DEF_PAGEFLAG_NAME(mitosis_from_cache)
+
 
 #define show_page_flags(flags)						\
 	(flags) ? __print_flags(flags, "|",				\

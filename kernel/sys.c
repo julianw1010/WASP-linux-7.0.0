@@ -66,6 +66,9 @@
 #include <linux/uidgid.h>
 #include <linux/cred.h>
 
+#include <asm/pgtable_repl.h>
+#include <asm/tlbflush.h>
+
 #include <linux/nospec.h>
 
 #include <linux/kmsg_dump.h>
@@ -2907,6 +2910,390 @@ SYSCALL_DEFINE5(prctl, int, option, unsigned long, arg2, unsigned long, arg3,
 		if (arg3 & PR_CFI_LOCK && !(arg3 & PR_CFI_DISABLE))
 			error = arch_prctl_lock_branch_landing_pad_state(me);
 		break;
+	case PR_SET_PGTABLE_REPL:
+	{
+		nodemask_t nodes;
+		struct mm_struct *mm = NULL;
+		struct task_struct *task = NULL;
+		int ret;
+		int node;
+		int valid_nodes = 0;
+		int max_node = min(NUMA_NODE_COUNT, (int)BITS_PER_LONG);
+		bool is_external = (arg3 != 0);
+
+		if (is_external) {
+			rcu_read_lock();
+			task = find_task_by_vpid((pid_t)arg3);
+			if (task)
+				get_task_struct(task);
+			rcu_read_unlock();
+
+			if (!task)
+				return -ESRCH;
+
+			mm = get_task_mm(task);
+		} else {
+			if (current->pid == 1)
+				return -EINVAL;
+
+			task = current;
+			mm = current->mm;
+			if (mm)
+				mmget(mm);
+		}
+
+		if (!mm) {
+			if (is_external && task)
+				put_task_struct(task);
+			error = -EINVAL;
+			break;
+		}
+
+		if (arg2 == 0) {
+			if (!mm->repl_pgd_enabled && nodes_empty(mm->repl_pgd_nodes)) {
+				error = 0;
+				goto out_put_mm;
+			}
+			if (!mm->repl_pgd_enabled && !nodes_empty(mm->repl_pgd_nodes)) {
+				mutex_lock(&mm->repl_mutex);
+				nodes_clear(mm->repl_pgd_nodes);
+				mutex_unlock(&mm->repl_mutex);
+				error = 0;
+				goto out_put_mm;
+			}
+
+			if (is_external) {
+				error = pgtable_repl_disable_external(task);
+			} else {
+				pgtable_repl_disable(mm);
+				error = 0;
+			}
+			goto out_put_mm;
+		}
+
+		if (num_online_nodes() <= 1) {
+			error = -EINVAL;
+			goto out_put_mm;
+		}
+
+		if (arg2 == 1) {
+			nodes = node_online_map;
+		} else {
+			nodes_clear(nodes);
+			for (node = 0; node < max_node; node++) {
+				if (arg2 & (1UL << node)) {
+					if (!node_online(node)) {
+						error = -EINVAL;
+						goto out_put_mm;
+					}
+					node_set(node, nodes);
+					valid_nodes++;
+				}
+			}
+			if (valid_nodes < 2) {
+				error = -EINVAL;
+				goto out_put_mm;
+			}
+		}
+
+		if (mm->repl_pgd_enabled && nodes_equal(mm->repl_pgd_nodes, nodes)) {
+			error = 0;
+			goto out_put_mm;
+		}
+
+		if (mm->repl_pgd_enabled) {
+			error = -EALREADY;
+			goto out_put_mm;
+		}
+
+		if (is_external) {
+			ret = pgtable_repl_enable_external(task, nodes);
+		} else {
+			ret = pgtable_repl_enable(mm, nodes);
+		}
+
+		if (ret) {
+			error = ret;
+		} else {
+			flush_tlb_mm(mm);
+			error = 0;
+		}
+
+	out_put_mm:
+		if (mm)
+			mmput(mm);
+		if (is_external && task)
+			put_task_struct(task);
+		break;
+	}
+	case PR_GET_PGTABLE_REPL:
+	{
+		unsigned long mask = 0;
+		int node;
+		int max_node = min(NUMA_NODE_COUNT, (int)BITS_PER_LONG);
+
+		if (current->mm && current->mm->repl_pgd_enabled) {
+			for_each_node_mask(node, current->mm->repl_pgd_nodes) {
+				if (node < max_node)
+					mask |= (1UL << node);
+			}
+			error = (long)mask;
+		} else {
+			error = 0;
+		}
+		break;
+	}
+	case PR_SET_PGTABLE_CACHE_ONLY:
+	{
+		struct mm_struct *mm = NULL;
+		struct task_struct *task = NULL;
+		pid_t target_pid = (pid_t)arg3;
+		bool is_self = (target_pid == 0);
+		bool enable = (arg2 != 0);
+
+		if (!is_self) {
+			rcu_read_lock();
+			task = find_task_by_vpid(target_pid);
+			if (task)
+				get_task_struct(task);
+			rcu_read_unlock();
+
+			if (!task) {
+				error = -ESRCH;
+				break;
+			}
+
+			mm = get_task_mm(task);
+		} else {
+			task = current;
+			mm = current->mm;
+			if (mm)
+				mmget(mm);
+		}
+
+		if (!mm) {
+			if (!is_self && task)
+				put_task_struct(task);
+			error = -EINVAL;
+			break;
+		}
+
+		if (enable && smp_load_acquire(&mm->repl_pgd_enabled)) {
+			error = -EBUSY;
+			mmput(mm);
+			if (!is_self && task)
+				put_task_struct(task);
+			break;
+		}
+
+		WRITE_ONCE(mm->cache_only_mode, enable);
+
+		error = 0;
+
+		mmput(mm);
+		if (!is_self && task)
+			put_task_struct(task);
+		break;
+	}
+	case PR_GET_PGTABLE_CACHE_ONLY:
+	{
+		struct mm_struct *mm = NULL;
+		struct task_struct *task = NULL;
+		pid_t target_pid = (pid_t)arg2;
+		bool is_self = (target_pid == 0);
+
+		if (!is_self) {
+			rcu_read_lock();
+			task = find_task_by_vpid(target_pid);
+			if (task)
+				get_task_struct(task);
+			rcu_read_unlock();
+
+			if (!task) {
+				error = -ESRCH;
+				break;
+			}
+
+			mm = get_task_mm(task);
+		} else {
+			task = current;
+			mm = current->mm;
+			if (mm)
+				mmget(mm);
+		}
+
+		if (!mm) {
+			if (!is_self && task)
+				put_task_struct(task);
+			error = -EINVAL;
+			break;
+		}
+
+		error = READ_ONCE(mm->cache_only_mode) ? 1 : 0;
+
+		mmput(mm);
+		if (!is_self && task)
+			put_task_struct(task);
+		break;
+	}
+	case PR_SET_PGTABLE_REPL_STEERING:
+	{
+		struct mm_struct *mm = NULL;
+		struct task_struct *task = NULL;
+		int steering[NUMA_NODE_COUNT];
+		int old_steering[NUMA_NODE_COUNT];
+		int __user *user_steering = (int __user *)arg2;
+		pid_t target_pid = (pid_t)arg3;
+		bool is_self = (target_pid == 0);
+		bool steering_changed = false;
+		int i;
+
+		if (!user_steering) {
+			error = -EINVAL;
+			break;
+		}
+
+		if (copy_from_user(steering, user_steering, sizeof(steering))) {
+			error = -EFAULT;
+			break;
+		}
+
+		for (i = 0; i < NUMA_NODE_COUNT; i++) {
+			if (steering[i] < -1 || steering[i] >= NUMA_NODE_COUNT) {
+				error = -EINVAL;
+				break;
+			}
+		}
+		if (error)
+			break;
+
+		if (!is_self) {
+			rcu_read_lock();
+			task = find_task_by_vpid(target_pid);
+			if (task)
+				get_task_struct(task);
+			rcu_read_unlock();
+
+			if (!task) {
+				error = -ESRCH;
+				break;
+			}
+
+			mm = get_task_mm(task);
+		} else {
+			task = current;
+			mm = current->mm;
+			if (mm)
+				mmget(mm);
+		}
+
+		if (!mm) {
+			if (!is_self && task)
+				put_task_struct(task);
+			error = -EINVAL;
+			break;
+		}
+
+		if (!smp_load_acquire(&mm->repl_pgd_enabled)) {
+			error = -EINVAL;
+			goto out_put_mm_steering;
+		}
+
+		for (i = 0; i < NUMA_NODE_COUNT; i++) {
+			int target = steering[i];
+			if (target >= 0) {
+				if (!node_isset(target, mm->repl_pgd_nodes) ||
+				    mm->pgd_replicas[target] == NULL) {
+					error = -EINVAL;
+					goto out_put_mm_steering;
+				}
+			}
+		}
+
+		for (i = 0; i < NUMA_NODE_COUNT; i++) {
+			old_steering[i] = READ_ONCE(mm->repl_steering[i]);
+			if (old_steering[i] != steering[i])
+				steering_changed = true;
+		}
+
+		if (steering_changed) {
+			nodemask_t changed_nodes;
+			nodes_clear(changed_nodes);
+
+			for (i = 0; i < NUMA_NODE_COUNT; i++) {
+				WRITE_ONCE(mm->repl_steering[i], steering[i]);
+				if (old_steering[i] != steering[i])
+					node_set(i, changed_nodes);
+			}
+			smp_wmb();
+
+			pgtable_repl_force_steering_switch(mm, &changed_nodes);
+		}
+
+		error = 0;
+
+	out_put_mm_steering:
+		if (mm)
+			mmput(mm);
+		if (!is_self && task)
+			put_task_struct(task);
+		break;
+	}
+	case PR_GET_PGTABLE_REPL_STEERING:
+	{
+		struct mm_struct *mm = NULL;
+		struct task_struct *task = NULL;
+		int steering[NUMA_NODE_COUNT];
+		int __user *user_steering = (int __user *)arg2;
+		pid_t target_pid = (pid_t)arg3;
+		bool is_self = (target_pid == 0);
+		int i;
+
+		if (!user_steering) {
+			error = -EINVAL;
+			break;
+		}
+
+		if (!is_self) {
+			rcu_read_lock();
+			task = find_task_by_vpid(target_pid);
+			if (task)
+				get_task_struct(task);
+			rcu_read_unlock();
+
+			if (!task) {
+				error = -ESRCH;
+				break;
+			}
+
+			mm = get_task_mm(task);
+		} else {
+			task = current;
+			mm = current->mm;
+			if (mm)
+				mmget(mm);
+		}
+
+		if (!mm) {
+			if (!is_self && task)
+				put_task_struct(task);
+			error = -EINVAL;
+			break;
+		}
+
+		for (i = 0; i < NUMA_NODE_COUNT; i++)
+			steering[i] = READ_ONCE(mm->repl_steering[i]);
+
+		if (copy_to_user(user_steering, steering, sizeof(steering)))
+			error = -EFAULT;
+		else
+			error = 0;
+
+		mmput(mm);
+		if (!is_self && task)
+			put_task_struct(task);
+		break;
+	}
 	default:
 		trace_task_prctl_unknown(option, arg2, arg3, arg4, arg5);
 		error = -EINVAL;

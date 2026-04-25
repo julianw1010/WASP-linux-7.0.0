@@ -6,6 +6,9 @@
 #include <asm/tlb.h>
 #include <asm/fixmap.h>
 #include <asm/mtrr.h>
+#include <linux/page-flags.h>
+
+#include <asm/pgtable_repl.h>
 
 #ifdef CONFIG_DYNAMIC_PHYSICAL_MASK
 phys_addr_t physical_mask __ro_after_init = (1ULL << __PHYSICAL_MASK_SHIFT) - 1;
@@ -20,36 +23,99 @@ pgtable_t pte_alloc_one(struct mm_struct *mm)
 
 void ___pte_free_tlb(struct mmu_gather *tlb, struct page *pte)
 {
-	paravirt_release_pte(page_to_pfn(pte));
-	tlb_remove_ptdesc(tlb, page_ptdesc(pte));
+    struct ptdesc *ptdesc = page_ptdesc(pte);
+    int nid = page_to_nid(pte);
+    bool from_cache = PageMitosisFromCache(pte);
+
+    paravirt_release_pte(tlb->mm, page_to_pfn(pte));
+    pte->pt_owner_mm = NULL;
+
+    if (from_cache) {
+        ClearPageMitosisFromCache(pte);
+        pte->pt_replica = NULL;
+        pagetable_dtor(ptdesc);
+        if (mitosis_cache_push(pte, nid, MITOSIS_CACHE_PTE))
+            return;
+        pagetable_free(ptdesc);
+        return;
+    }
+    ClearPageMitosisFromCache(pte);
+    tlb_remove_ptdesc(tlb, ptdesc);
 }
 
 #if CONFIG_PGTABLE_LEVELS > 2
 void ___pmd_free_tlb(struct mmu_gather *tlb, pmd_t *pmd)
 {
-	paravirt_release_pmd(__pa(pmd) >> PAGE_SHIFT);
-	/*
-	 * NOTE! For PAE, any changes to the top page-directory-pointer-table
-	 * entries need a full cr3 reload to flush.
-	 */
+    struct ptdesc *ptdesc = virt_to_ptdesc(pmd);
+    struct page *page = ptdesc_page(ptdesc);
+    int nid = page_to_nid(page);
+    bool from_cache = PageMitosisFromCache(page);
+
+    paravirt_release_pmd(tlb->mm, __pa(pmd) >> PAGE_SHIFT);
 #ifdef CONFIG_X86_PAE
-	tlb->need_flush_all = 1;
+    tlb->need_flush_all = 1;
 #endif
-	tlb_remove_ptdesc(tlb, virt_to_ptdesc(pmd));
+    page->pt_owner_mm = NULL;
+
+    if (from_cache) {
+        ClearPageMitosisFromCache(page);
+        page->pt_replica = NULL;
+        pagetable_dtor(ptdesc);
+        if (mitosis_cache_push(page, nid, MITOSIS_CACHE_PMD))
+            return;
+        pagetable_free(ptdesc);
+        return;
+    }
+    ClearPageMitosisFromCache(page);
+    tlb_remove_ptdesc(tlb, ptdesc);
 }
 
 #if CONFIG_PGTABLE_LEVELS > 3
 void ___pud_free_tlb(struct mmu_gather *tlb, pud_t *pud)
 {
-	paravirt_release_pud(__pa(pud) >> PAGE_SHIFT);
-	tlb_remove_ptdesc(tlb, virt_to_ptdesc(pud));
+    struct ptdesc *ptdesc = virt_to_ptdesc(pud);
+    struct page *page = ptdesc_page(ptdesc);
+    int nid = page_to_nid(page);
+    bool from_cache = PageMitosisFromCache(page);
+
+    paravirt_release_pud(tlb->mm, __pa(pud) >> PAGE_SHIFT);
+    page->pt_owner_mm = NULL;
+
+    if (from_cache) {
+        ClearPageMitosisFromCache(page);
+        page->pt_replica = NULL;
+        pagetable_dtor(ptdesc);
+        if (mitosis_cache_push(page, nid, MITOSIS_CACHE_PUD))
+            return;
+        pagetable_free(ptdesc);
+        return;
+    }
+    ClearPageMitosisFromCache(page);
+    tlb_remove_ptdesc(tlb, ptdesc);
 }
 
 #if CONFIG_PGTABLE_LEVELS > 4
 void ___p4d_free_tlb(struct mmu_gather *tlb, p4d_t *p4d)
 {
-	paravirt_release_p4d(__pa(p4d) >> PAGE_SHIFT);
-	tlb_remove_ptdesc(tlb, virt_to_ptdesc(p4d));
+    struct ptdesc *ptdesc = virt_to_ptdesc(p4d);
+    struct page *page = ptdesc_page(ptdesc);
+    int nid = page_to_nid(page);
+    bool from_cache = PageMitosisFromCache(page);
+
+    paravirt_release_p4d(tlb->mm, __pa(p4d) >> PAGE_SHIFT);
+    page->pt_owner_mm = NULL;
+
+    if (from_cache) {
+        ClearPageMitosisFromCache(page);
+        page->pt_replica = NULL;
+        pagetable_dtor(ptdesc);
+        if (mitosis_cache_push(page, nid, MITOSIS_CACHE_P4D))
+            return;
+        pagetable_free(ptdesc);
+        return;
+    }
+    ClearPageMitosisFromCache(page);
+    tlb_remove_ptdesc(tlb, ptdesc);
 }
 #endif	/* CONFIG_PGTABLE_LEVELS > 4 */
 #endif	/* CONFIG_PGTABLE_LEVELS > 3 */
@@ -219,13 +285,10 @@ static int preallocate_pmds(struct mm_struct *mm, pmd_t *pmds[], int count)
 static void mop_up_one_pmd(struct mm_struct *mm, pgd_t *pgdp)
 {
 	pgd_t pgd = *pgdp;
-
 	if (pgd_val(pgd) != 0) {
 		pmd_t *pmd = (pmd_t *)pgd_page_vaddr(pgd);
-
 		pgd_clear(pgdp);
-
-		paravirt_release_pmd(pgd_val(pgd) >> PAGE_SHIFT);
+		paravirt_release_pmd(mm, pgd_val(pgd) >> PAGE_SHIFT);
 		pmd_free(mm, pmd);
 		mm_dec_nr_pmds(mm);
 	}
@@ -305,17 +368,44 @@ static void pgd_prepopulate_user_pmd(struct mm_struct *mm,
 
 static inline pgd_t *_pgd_alloc(struct mm_struct *mm)
 {
-	/*
-	 * PTI and Xen need a whole page for the PAE PGD
-	 * even though the hardware only needs 32 bytes.
-	 *
-	 * For simplicity, allocate a page for all users.
-	 */
-	return __pgd_alloc(mm, pgd_allocation_order());
+	int order = pgd_allocation_order();
+	struct page *page;
+	pgd_t *pgd;
+
+	if (mitosis_active(mm)) {
+		page = mitosis_alloc_primary(mm, GFP_PGTABLE_USER, order,
+					      MITOSIS_CACHE_PGD);
+		if (!page)
+			return NULL;
+		pgd = (pgd_t *)page_address(page);
+	} else {
+		pgd = __pgd_alloc(mm, order);
+		if (!pgd)
+			return NULL;
+		page = virt_to_page(pgd);
+	}
+
+	page->pt_owner_mm = mm;
+	return pgd;
 }
 
 static inline void _pgd_free(struct mm_struct *mm, pgd_t *pgd)
 {
+	struct page *page = virt_to_page(pgd);
+	int order = pgd_allocation_order();
+	int nid = page_to_nid(page);
+	bool from_cache = PageMitosisFromCache(page);
+
+
+	page->pt_owner_mm = NULL;
+
+	if (order == 0 && from_cache) {
+		ClearPageMitosisFromCache(page);
+		page->pt_replica = NULL;
+		if (mitosis_cache_push(page, nid, MITOSIS_CACHE_PGD))
+			return;
+	}
+	ClearPageMitosisFromCache(page);
 	__pgd_free(mm, pgd);
 }
 
@@ -446,26 +536,14 @@ int pudp_set_access_flags(struct vm_area_struct *vma, unsigned long address,
 int ptep_test_and_clear_young(struct vm_area_struct *vma,
 			      unsigned long addr, pte_t *ptep)
 {
-	int ret = 0;
-
-	if (pte_young(*ptep))
-		ret = test_and_clear_bit(_PAGE_BIT_ACCESSED,
-					 (unsigned long *) &ptep->pte);
-
-	return ret;
+        return pgtable_repl_ptep_test_and_clear_young(vma, addr, ptep);
 }
 
 #if defined(CONFIG_TRANSPARENT_HUGEPAGE) || defined(CONFIG_ARCH_HAS_NONLEAF_PMD_YOUNG)
 int pmdp_test_and_clear_young(struct vm_area_struct *vma,
 			      unsigned long addr, pmd_t *pmdp)
 {
-	int ret = 0;
-
-	if (pmd_young(*pmdp))
-		ret = test_and_clear_bit(_PAGE_BIT_ACCESSED,
-					 (unsigned long *)pmdp);
-
-	return ret;
+	return pgtable_repl_pmdp_test_and_clear_young(vma, addr, pmdp);
 }
 #endif
 

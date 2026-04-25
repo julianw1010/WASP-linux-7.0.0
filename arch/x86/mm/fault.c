@@ -39,6 +39,8 @@
 #define CREATE_TRACE_POINTS
 #include <trace/events/exceptions.h>
 
+#include <linux/percpu.h>
+
 /*
  * Returns 0 if mmiotrace is disabled, or if the fault is not
  * handled by mmiotrace:
@@ -1216,7 +1218,7 @@ void do_user_addr_fault(struct pt_regs *regs,
 
 	tsk = current;
 	mm = tsk->mm;
-
+	
 	if (unlikely((error_code & (X86_PF_USER | X86_PF_INSTR)) == X86_PF_INSTR)) {
 		/*
 		 * Whoops, this is kernel mode code trying to execute from

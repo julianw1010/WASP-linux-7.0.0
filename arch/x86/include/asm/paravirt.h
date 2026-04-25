@@ -298,28 +298,27 @@ static inline void paravirt_alloc_pte(struct mm_struct *mm, unsigned long pfn)
 {
 	PVOP_VCALL2(pv_ops, mmu.alloc_pte, mm, pfn);
 }
-static inline void paravirt_release_pte(unsigned long pfn)
+static inline void paravirt_release_pte(struct mm_struct *mm, unsigned long pfn)
 {
-	PVOP_VCALL1(pv_ops, mmu.release_pte, pfn);
+	PVOP_VCALL2(pv_ops, mmu.release_pte, mm, pfn);
 }
 
 static inline void paravirt_alloc_pmd(struct mm_struct *mm, unsigned long pfn)
 {
 	PVOP_VCALL2(pv_ops, mmu.alloc_pmd, mm, pfn);
 }
-
-static inline void paravirt_release_pmd(unsigned long pfn)
+static inline void paravirt_release_pmd(struct mm_struct *mm, unsigned long pfn)
 {
-	PVOP_VCALL1(pv_ops, mmu.release_pmd, pfn);
+	PVOP_VCALL2(pv_ops, mmu.release_pmd, mm, pfn);
 }
 
 static inline void paravirt_alloc_pud(struct mm_struct *mm, unsigned long pfn)
 {
 	PVOP_VCALL2(pv_ops, mmu.alloc_pud, mm, pfn);
 }
-static inline void paravirt_release_pud(unsigned long pfn)
+static inline void paravirt_release_pud(struct mm_struct *mm, unsigned long pfn)
 {
-	PVOP_VCALL1(pv_ops, mmu.release_pud, pfn);
+	PVOP_VCALL2(pv_ops, mmu.release_pud, mm, pfn);
 }
 
 static inline void paravirt_alloc_p4d(struct mm_struct *mm, unsigned long pfn)
@@ -327,9 +326,9 @@ static inline void paravirt_alloc_p4d(struct mm_struct *mm, unsigned long pfn)
 	PVOP_VCALL2(pv_ops, mmu.alloc_p4d, mm, pfn);
 }
 
-static inline void paravirt_release_p4d(unsigned long pfn)
+static inline void paravirt_release_p4d(struct mm_struct *mm, unsigned long pfn)
 {
-	PVOP_VCALL1(pv_ops, mmu.release_p4d, pfn);
+	PVOP_VCALL2(pv_ops, mmu.release_p4d, mm, pfn);
 }
 
 static inline pte_t __pte(pteval_t val)
