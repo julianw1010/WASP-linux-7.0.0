@@ -3520,6 +3520,8 @@ static inline void __pagetable_ctor(struct ptdesc *ptdesc)
 
 	__folio_set_pgtable(folio);
 	lruvec_stat_add_folio(folio, NR_PAGETABLE);
+	ptdesc_page(ptdesc)->pt_replica = NULL;
+	ptdesc_page(ptdesc)->pt_owner_mm = NULL;
 }
 
 static inline void pagetable_dtor(struct ptdesc *ptdesc)

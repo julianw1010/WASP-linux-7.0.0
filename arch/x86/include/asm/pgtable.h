@@ -23,6 +23,7 @@
 #include <asm/coco.h>
 #include <asm-generic/pgtable_uffd.h>
 #include <linux/page_table_check.h>
+#include <asm/pgtable_repl.h>
 
 extern pgd_t early_top_pgt[PTRS_PER_PGD];
 bool __init __early_make_pgtable(unsigned long address, pmdval_t pmd);
@@ -1251,27 +1252,19 @@ extern int ptep_clear_flush_young(struct vm_area_struct *vma,
 static inline pte_t ptep_get_and_clear(struct mm_struct *mm, unsigned long addr,
 				       pte_t *ptep)
 {
-	pte_t pte = native_ptep_get_and_clear(ptep);
+	pte_t pte = pgtable_repl_ptep_get_and_clear(mm, ptep);
 	page_table_check_pte_clear(mm, addr, pte);
 	return pte;
 }
 
 #define __HAVE_ARCH_PTEP_GET_AND_CLEAR_FULL
 static inline pte_t ptep_get_and_clear_full(struct mm_struct *mm,
-					    unsigned long addr, pte_t *ptep,
-					    int full)
+                                            unsigned long addr, pte_t *ptep,
+                                            int full)
 {
 	pte_t pte;
-	if (full) {
-		/*
-		 * Full address destruction in progress; paravirt does not
-		 * care about updates and native needs no locking
-		 */
-		pte = native_local_ptep_get_and_clear(ptep);
-		page_table_check_pte_clear(mm, addr, pte);
-	} else {
-		pte = ptep_get_and_clear(mm, addr, ptep);
-	}
+	pte = pgtable_repl_ptep_get_and_clear(mm, ptep);
+	page_table_check_pte_clear(mm, addr, pte);
 	return pte;
 }
 
@@ -1279,17 +1272,7 @@ static inline pte_t ptep_get_and_clear_full(struct mm_struct *mm,
 static inline void ptep_set_wrprotect(struct mm_struct *mm,
 				      unsigned long addr, pte_t *ptep)
 {
-	/*
-	 * Avoid accidentally creating shadow stack PTEs
-	 * (Write=0,Dirty=1).  Use cmpxchg() to prevent races with
-	 * the hardware setting Dirty=1.
-	 */
-	pte_t old_pte, new_pte;
-
-	old_pte = READ_ONCE(*ptep);
-	do {
-		new_pte = pte_wrprotect(old_pte);
-	} while (!try_cmpxchg((long *)&ptep->pte, (long *)&old_pte, *(long *)&new_pte));
+	pgtable_repl_ptep_set_wrprotect(mm, addr, ptep);
 }
 
 #define flush_tlb_fix_spurious_fault(vma, address, ptep) do { } while (0)
@@ -1315,12 +1298,10 @@ extern int pmdp_clear_flush_young(struct vm_area_struct *vma,
 
 #define __HAVE_ARCH_PMDP_HUGE_GET_AND_CLEAR
 static inline pmd_t pmdp_huge_get_and_clear(struct mm_struct *mm, unsigned long addr,
-				       pmd_t *pmdp)
+                                            pmd_t *pmdp)
 {
-	pmd_t pmd = native_pmdp_get_and_clear(pmdp);
-
+	pmd_t pmd = pgtable_repl_pmdp_huge_get_and_clear(mm, pmdp);
 	page_table_check_pmd_clear(mm, addr, pmd);
-
 	return pmd;
 }
 
@@ -1339,17 +1320,7 @@ static inline pud_t pudp_huge_get_and_clear(struct mm_struct *mm,
 static inline void pmdp_set_wrprotect(struct mm_struct *mm,
 				      unsigned long addr, pmd_t *pmdp)
 {
-	/*
-	 * Avoid accidentally creating shadow stack PTEs
-	 * (Write=0,Dirty=1).  Use cmpxchg() to prevent races with
-	 * the hardware setting Dirty=1.
-	 */
-	pmd_t old_pmd, new_pmd;
-
-	old_pmd = READ_ONCE(*pmdp);
-	do {
-		new_pmd = pmd_wrprotect(old_pmd);
-	} while (!try_cmpxchg((long *)pmdp, (long *)&old_pmd, *(long *)&new_pmd));
+	pgtable_repl_pmdp_set_wrprotect(mm, addr, pmdp);
 }
 
 #ifndef pmdp_establish
@@ -1358,13 +1329,7 @@ static inline pmd_t pmdp_establish(struct vm_area_struct *vma,
 		unsigned long address, pmd_t *pmdp, pmd_t pmd)
 {
 	page_table_check_pmd_set(vma->vm_mm, address, pmdp, pmd);
-	if (IS_ENABLED(CONFIG_SMP)) {
-		return xchg(pmdp, pmd);
-	} else {
-		pmd_t old = *pmdp;
-		WRITE_ONCE(*pmdp, pmd);
-		return old;
-	}
+	return pgtable_repl_pmdp_establish(vma->vm_mm, pmdp, pmd);
 }
 #endif
 

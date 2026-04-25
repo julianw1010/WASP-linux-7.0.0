@@ -24,6 +24,8 @@
 #include <asm/perf_event.h>
 #include <asm/tlb.h>
 
+#include <asm/pgtable_repl.h>
+
 #include "mm_internal.h"
 
 #ifdef CONFIG_PARAVIRT
@@ -790,148 +792,142 @@ void switch_mm_irqs_off(struct mm_struct *unused, struct mm_struct *next,
 	unsigned long new_lam;
 	struct new_asid ns;
 	u64 next_tlb_gen;
+	pgd_t *pgd_to_use;
+	bool using_replica = false;
+	bool rcu_held = false;
+	int local_node;
+	int target_node;
+	bool repl_enabled;
+	bool repl_in_progress;
+	pgd_t *selected_replica = NULL;
 
+	local_node = numa_node_id();
 
-	/* We don't want flush_tlb_func() to run concurrently with us. */
+	rcu_read_lock();
+	rcu_held = true;
+
+	repl_enabled = smp_load_acquire(&next->repl_pgd_enabled);
+	pgd_to_use = next->pgd;
+
+	if (repl_enabled) {
+		repl_in_progress = smp_load_acquire(&next->repl_in_progress);
+
+		if (!repl_in_progress) {
+			pgd_t *node_pgd;
+			int steered_node;
+
+			steered_node = READ_ONCE(next->repl_steering[local_node]);
+			if (steered_node >= 0 && steered_node < MAX_NUMNODES)
+				target_node = steered_node;
+			else
+				target_node = local_node;
+
+			node_pgd = READ_ONCE(next->pgd_replicas[target_node]);
+
+			if (node_pgd && virt_addr_valid(node_pgd)) {
+				if (smp_load_acquire(&next->repl_pgd_enabled) &&
+				    !smp_load_acquire(&next->repl_in_progress)) {
+					struct page *pgd_page = virt_to_page(node_pgd);
+
+					if (pgd_page && page_to_nid(pgd_page) == target_node) {
+						unsigned long pa = __pa(node_pgd);
+						if (pa && pfn_valid(pa >> PAGE_SHIFT)) {
+							selected_replica = node_pgd;
+							pgd_to_use = node_pgd;
+							using_replica = (node_pgd != next->pgd);
+						}
+					}
+				}
+			}
+		}
+	}
+
 	if (IS_ENABLED(CONFIG_PROVE_LOCKING))
 		WARN_ON_ONCE(!irqs_disabled());
 
-	/*
-	 * Verify that CR3 is what we think it is.  This will catch
-	 * hypothetical buggy code that directly switches to swapper_pg_dir
-	 * without going through leave_mm() / switch_mm_irqs_off() or that
-	 * does something like write_cr3(read_cr3_pa()).
-	 *
-	 * Only do this check if CONFIG_DEBUG_VM=y because __read_cr3()
-	 * isn't free.
-	 */
+#if 0
 #ifdef CONFIG_DEBUG_VM
 	if (WARN_ON_ONCE(__read_cr3() != build_cr3(prev->pgd, prev_asid,
 						   tlbstate_lam_cr3_mask()))) {
-		/*
-		 * If we were to BUG here, we'd be very likely to kill
-		 * the system so hard that we don't see the call trace.
-		 * Try to recover instead by ignoring the error and doing
-		 * a global flush to minimize the chance of corruption.
-		 *
-		 * (This is far from being a fully correct recovery.
-		 *  Architecturally, the CPU could prefetch something
-		 *  back into an incorrect ASID slot and leave it there
-		 *  to cause trouble down the road.  It's better than
-		 *  nothing, though.)
-		 */
 		__flush_tlb_all();
 	}
 #endif
+#endif
+
 	if (was_lazy)
 		this_cpu_write(cpu_tlbstate_shared.is_lazy, false);
 
-	/*
-	 * The membarrier system call requires a full memory barrier and
-	 * core serialization before returning to user-space, after
-	 * storing to rq->curr, when changing mm.  This is because
-	 * membarrier() sends IPIs to all CPUs that are in the target mm
-	 * to make them issue memory barriers.  However, if another CPU
-	 * switches to/from the target mm concurrently with
-	 * membarrier(), it can cause that CPU not to receive an IPI
-	 * when it really should issue a memory barrier.  Writing to CR3
-	 * provides that full memory barrier and core serializing
-	 * instruction.
-	 */
 	if (prev == next) {
-		/* Not actually switching mm's */
 		VM_WARN_ON(is_dyn_asid(prev_asid) &&
 			   this_cpu_read(cpu_tlbstate.ctxs[prev_asid].ctx_id) !=
 			   next->context.ctx_id);
 
-		/*
-		 * If this races with another thread that enables lam, 'new_lam'
-		 * might not match tlbstate_lam_cr3_mask().
-		 */
-
-		/*
-		 * Even in lazy TLB mode, the CPU should stay set in the
-		 * mm_cpumask. The TLB shootdown code can figure out from
-		 * cpu_tlbstate_shared.is_lazy whether or not to send an IPI.
-		 */
 		if (IS_ENABLED(CONFIG_DEBUG_VM) &&
 		    WARN_ON_ONCE(prev != &init_mm && !is_notrack_mm(prev) &&
 				 !cpumask_test_cpu(cpu, mm_cpumask(next))))
 			cpumask_set_cpu(cpu, mm_cpumask(next));
 
-		/* Check if the current mm is transitioning to a global ASID */
 		if (mm_needs_global_asid(next, prev_asid)) {
 			next_tlb_gen = atomic64_read(&next->context.tlb_gen);
 			ns = choose_new_asid(next, next_tlb_gen);
 			goto reload_tlb;
 		}
 
-		/*
-		 * Broadcast TLB invalidation keeps this ASID up to date
-		 * all the time.
-		 */
-		if (is_global_asid(prev_asid))
+		if (is_global_asid(prev_asid)) {
+			if (rcu_held)
+				rcu_read_unlock();
 			return;
+		}
 
-		/*
-		 * If the CPU is not in lazy TLB mode, we are just switching
-		 * from one thread in a process to another thread in the same
-		 * process. No TLB flush required.
-		 */
-		if (!was_lazy)
+		if (selected_replica) {
+			unsigned long current_cr3_pa = __read_cr3() & PAGE_MASK;
+			unsigned long target_cr3_pa = __pa(selected_replica);
+
+			if (current_cr3_pa != target_cr3_pa) {
+				if (smp_load_acquire(&next->repl_pgd_enabled) &&
+				    !smp_load_acquire(&next->repl_in_progress)) {
+					unsigned long new_cr3 = target_cr3_pa | (__read_cr3() & ~PAGE_MASK);
+					native_write_cr3(new_cr3);
+					__flush_tlb_all();
+				}
+				rcu_read_unlock();
+				return;
+			}
+		} else if (repl_enabled) {
+			unsigned long current_cr3_pa = __read_cr3() & PAGE_MASK;
+			unsigned long primary_cr3_pa = __pa(next->pgd);
+
+			if (current_cr3_pa != primary_cr3_pa) {
+				unsigned long new_cr3 = primary_cr3_pa | (__read_cr3() & ~PAGE_MASK);
+				native_write_cr3(new_cr3);
+				__flush_tlb_all();
+				rcu_read_unlock();
+				return;
+			}
+		}
+
+		if (!was_lazy) {
+			if (rcu_held)
+				rcu_read_unlock();
 			return;
+		}
 
-		/*
-		 * Read the tlb_gen to check whether a flush is needed.
-		 * If the TLB is up to date, just use it.
-		 * The barrier synchronizes with the tlb_gen increment in
-		 * the TLB shootdown code.
-		 */
 		smp_mb();
 		next_tlb_gen = atomic64_read(&next->context.tlb_gen);
 		if (this_cpu_read(cpu_tlbstate.ctxs[prev_asid].tlb_gen) ==
-				next_tlb_gen)
+				next_tlb_gen) {
+			if (rcu_held)
+				rcu_read_unlock();
 			return;
+		}
 
-		/*
-		 * TLB contents went out of date while we were in lazy
-		 * mode. Fall through to the TLB switching code below.
-		 */
 		ns.asid = prev_asid;
 		ns.need_flush = true;
 	} else {
-		/*
-		 * Apply process to process speculation vulnerability
-		 * mitigations if applicable.
-		 */
 		cond_mitigation(tsk);
 
-		/*
-		 * Indicate that CR3 is about to change. nmi_uaccess_okay()
-		 * and others are sensitive to the window where mm_cpumask(),
-		 * CR3 and cpu_tlbstate.loaded_mm are not all in sync.
-		 */
 		this_cpu_write(cpu_tlbstate.loaded_mm, LOADED_MM_SWITCHING);
 
-		/*
-		 * Make sure this CPU is set in mm_cpumask() such that we'll
-		 * receive invalidation IPIs.
-		 *
-		 * Rely on the smp_mb() implied by cpumask_set_cpu()'s atomic
-		 * operation, or explicitly provide one. Such that:
-		 *
-		 * switch_mm_irqs_off()				flush_tlb_mm_range()
-		 *   smp_store_release(loaded_mm, SWITCHING);     atomic64_inc_return(tlb_gen)
-		 *   smp_mb(); // here                            // smp_mb() implied
-		 *   atomic64_read(tlb_gen);                      this_cpu_read(loaded_mm);
-		 *
-		 * we properly order against flush_tlb_mm_range(), where the
-		 * loaded_mm load can happen in mative_flush_tlb_multi() ->
-		 * should_flush_tlb().
-		 *
-		 * This way switch_mm() must see the new tlb_gen or
-		 * flush_tlb_mm_range() must see the new loaded_mm, or both.
-		 */
 		if (next != &init_mm && !cpumask_test_cpu(cpu, mm_cpumask(next)))
 			cpumask_set_cpu(cpu, mm_cpumask(next));
 		else
@@ -943,27 +939,35 @@ void switch_mm_irqs_off(struct mm_struct *unused, struct mm_struct *next,
 	}
 
 reload_tlb:
+	if (selected_replica) {
+		if (!smp_load_acquire(&next->repl_pgd_enabled) ||
+		    smp_load_acquire(&next->repl_in_progress)) {
+			pgd_to_use = next->pgd;
+			using_replica = false;
+			selected_replica = NULL;
+		}
+	}
+
 	new_lam = mm_lam_cr3_mask(next);
 	if (ns.need_flush) {
 		VM_WARN_ON_ONCE(is_global_asid(ns.asid));
 		this_cpu_write(cpu_tlbstate.ctxs[ns.asid].ctx_id, next->context.ctx_id);
 		this_cpu_write(cpu_tlbstate.ctxs[ns.asid].tlb_gen, next_tlb_gen);
-		load_new_mm_cr3(next->pgd, ns.asid, new_lam, true);
-
+		load_new_mm_cr3(pgd_to_use, ns.asid, new_lam, true);
 		trace_tlb_flush(TLB_FLUSH_ON_TASK_SWITCH, TLB_FLUSH_ALL);
 	} else {
-		/* The new ASID is already up to date. */
-		load_new_mm_cr3(next->pgd, ns.asid, new_lam, false);
-
+		load_new_mm_cr3(pgd_to_use, ns.asid, new_lam, false);
 		trace_tlb_flush(TLB_FLUSH_ON_TASK_SWITCH, 0);
 	}
 
-	/* Make sure we write CR3 before loaded_mm. */
 	barrier();
 
 	this_cpu_write(cpu_tlbstate.loaded_mm, next);
 	this_cpu_write(cpu_tlbstate.loaded_mm_asid, ns.asid);
 	cpu_tlbstate_update_lam(new_lam, mm_untag_mask(next));
+
+	if (rcu_held)
+		rcu_read_unlock();
 
 	if (next != prev) {
 		cr4_update_pce_mm(next);
@@ -1454,17 +1458,11 @@ void flush_tlb_mm_range(struct mm_struct *mm, unsigned long start,
 	int cpu = get_cpu();
 	u64 new_tlb_gen;
 
-	/* This is also a barrier that synchronizes with switch_mm(). */
 	new_tlb_gen = inc_mm_tlb_gen(mm);
-
 	info = get_flush_tlb_info(mm, start, end, stride_shift, freed_tables,
 				  new_tlb_gen);
 
-	/*
-	 * flush_tlb_multi() is not optimized for the common case in which only
-	 * a local TLB flush is needed. Optimize this use-case by calling
-	 * flush_tlb_func_local() directly in this case.
-	 */
+
 	if (mm_global_asid(mm)) {
 		broadcast_tlb_flush(info);
 	} else if (cpumask_any_but(mm_cpumask(mm), cpu) < nr_cpu_ids) {
@@ -1477,8 +1475,8 @@ void flush_tlb_mm_range(struct mm_struct *mm, unsigned long start,
 		flush_tlb_func(info);
 		local_irq_enable();
 	}
-
 	put_flush_tlb_info();
+	mitosis_drain_deferred_pages(mm);
 	put_cpu();
 	mmu_notifier_arch_invalidate_secondary_tlbs(mm, start, end);
 }

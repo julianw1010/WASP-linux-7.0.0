@@ -122,6 +122,8 @@
 #define CREATE_TRACE_POINTS
 #include <trace/events/task.h>
 
+#include <asm/pgtable_repl.h>
+
 #include <kunit/visibility.h>
 
 /*
@@ -1113,6 +1115,25 @@ static struct mm_struct *mm_init(struct mm_struct *mm, struct task_struct *p,
 	if (futex_mm_init(mm))
 		goto fail_mm_init;
 
+	mm->repl_pgd_enabled = false;
+	mm->repl_in_progress = false;
+	mm->repl_pending_enable = false;
+	mm->cache_only_mode = false;
+	nodes_clear(mm->repl_pgd_nodes);
+	nodes_clear(mm->repl_pending_nodes);
+	mutex_init(&mm->repl_mutex);
+	spin_lock_init(&mm->repl_alloc_lock);
+	spin_lock_init(&mm->mitosis_deferred_lock);
+	mm->mitosis_deferred_pages = NULL;
+	atomic_set(&mm->pgtable_interleave_counter, 0);
+	
+	
+	memset(mm->pgd_replicas, 0, sizeof(mm->pgd_replicas));
+	mm->original_pgd = NULL;
+	for (int i = 0; i < NUMA_NODE_COUNT; i++) {
+		mm->repl_steering[i] = -1;
+	}	
+
 	if (mm_alloc_pgd(mm))
 		goto fail_nopgd;
 
@@ -1194,8 +1215,19 @@ void mmput(struct mm_struct *mm)
 {
 	might_sleep();
 
-	if (atomic_dec_and_test(&mm->mm_users))
+	if (atomic_dec_and_test(&mm->mm_users)) {
+		bool repl = mm->repl_pgd_enabled;
+
+		if (repl) {
+			WARN_ON_ONCE(atomic_read(&mm->mm_users) != 0);
+			synchronize_rcu();
+			pgtable_repl_disable(mm);
+			WARN_ON_ONCE(mm->repl_pgd_enabled);
+			WARN_ON_ONCE(!nodes_empty(mm->repl_pgd_nodes));
+		}
+		mitosis_drain_deferred_pages(mm);
 		__mmput(mm);
+	}
 }
 EXPORT_SYMBOL_GPL(mmput);
 
@@ -1517,6 +1549,8 @@ static struct mm_struct *dup_mm(struct task_struct *tsk,
 {
 	struct mm_struct *mm;
 	int err;
+	bool saved_cache_only_mode = oldmm->cache_only_mode;
+
 
 	mm = allocate_mm();
 	if (!mm)
@@ -1526,6 +1560,8 @@ static struct mm_struct *dup_mm(struct task_struct *tsk,
 
 	if (!mm_init(mm, tsk, mm->user_ns))
 		goto fail_nomem;
+
+	mm->cache_only_mode = saved_cache_only_mode;
 
 	uprobe_start_dup_mmap();
 	err = dup_mmap(mm, oldmm);
@@ -1580,9 +1616,31 @@ static int copy_mm(u64 clone_flags, struct task_struct *tsk)
 		mmget(oldmm);
 		mm = oldmm;
 	} else {
-		mm = dup_mm(tsk, current->mm);
+		bool parent_had_mitosis = false;
+		nodemask_t saved_nodes;
+
+		nodes_clear(saved_nodes);
+
+		mutex_lock(&oldmm->repl_mutex);
+		if (oldmm->repl_pgd_enabled &&
+		    !nodes_empty(oldmm->repl_pgd_nodes) &&
+		    nodes_weight(oldmm->repl_pgd_nodes) >= 2) {
+			parent_had_mitosis = true;
+			saved_nodes = oldmm->repl_pgd_nodes;
+		}
+		mutex_unlock(&oldmm->repl_mutex);
+
+		mm = dup_mm(tsk, oldmm);
 		if (!mm)
 			return -ENOMEM;
+
+		if (sysctl_mitosis_inherit == 1 && parent_had_mitosis) {
+			pgtable_repl_enable(mm, saved_nodes);
+		} else if (sysctl_mitosis_mode == 1 &&
+			   !(tsk->flags & PF_KTHREAD) &&
+			   num_online_nodes() >= 2) {
+			pgtable_repl_enable(mm, node_online_map);
+		}
 	}
 
 	tsk->mm = mm;

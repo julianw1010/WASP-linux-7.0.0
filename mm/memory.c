@@ -90,6 +90,8 @@
 #include "internal.h"
 #include "swap.h"
 
+#include <asm/pgtable_repl.h>
+
 #if defined(LAST_CPUPID_NOT_IN_PAGE_FLAGS) && !defined(CONFIG_COMPILE_TEST)
 #warning Unfortunate NUMA and NUMA Balancing config, growing page-frame for last_cpupid.
 #endif
@@ -6373,7 +6375,6 @@ static vm_fault_t __handle_mm_fault(struct vm_area_struct *vma,
 	p4d = p4d_alloc(mm, pgd, address);
 	if (!p4d)
 		return VM_FAULT_OOM;
-
 	vmf.pud = pud_alloc(mm, p4d, address);
 	if (!vmf.pud)
 		return VM_FAULT_OOM;
@@ -6622,6 +6623,10 @@ vm_fault_t handle_mm_fault(struct vm_area_struct *vma, unsigned long address,
 		ret = hugetlb_fault(vma->vm_mm, vma, address, flags);
 	else
 		ret = __handle_mm_fault(vma, address, flags);
+
+	if (smp_load_acquire(&vma->vm_mm->repl_pgd_enabled) &&
+		!(ret & (VM_FAULT_ERROR | VM_FAULT_RETRY)))
+		mitosis_verify_fault_walk(vma->vm_mm, address);
 
 	/*
 	 * Warning: It is no longer safe to dereference vma-> after this point,

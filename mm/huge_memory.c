@@ -48,6 +48,10 @@
 #define CREATE_TRACE_POINTS
 #include <trace/events/thp.h>
 
+#include <asm/pgalloc.h>
+
+#include <asm/pgtable_repl.h>
+
 /*
  * By default, transparent hugepage support is disabled in order to avoid
  * risking an increased memory footprint for applications that are not
@@ -1778,7 +1782,7 @@ bool touch_pmd(struct vm_area_struct *vma, unsigned long addr,
 {
 	pmd_t entry;
 
-	entry = pmd_mkyoung(*pmd);
+	entry = pmd_mkyoung(pgtable_repl_get_pmd(pmd));
 	if (write)
 		entry = pmd_mkdirty(entry);
 	if (pmdp_set_access_flags(vma, addr & HPAGE_PMD_MASK,
@@ -1889,7 +1893,7 @@ int copy_huge_pmd(struct mm_struct *dst_mm, struct mm_struct *src_mm,
 	spin_lock_nested(src_ptl, SINGLE_DEPTH_NESTING);
 
 	ret = -EAGAIN;
-	pmd = *src_pmd;
+	pmd = pgtable_repl_get_pmd(src_pmd);
 
 	if (unlikely(thp_migration_supported() &&
 		     pmd_is_valid_softleaf(pmd))) {
@@ -2107,13 +2111,11 @@ vm_fault_t do_huge_pmd_wp_page(struct vm_fault *vmf)
 		}
 		folio_put(folio);
 	}
-
 	/* Recheck after temporarily dropping the PT lock. */
 	if (PageAnonExclusive(page)) {
 		folio_unlock(folio);
 		goto reuse;
 	}
-
 	/*
 	 * See do_wp_page(): we can only reuse the folio exclusively if
 	 * there are no additional references. Note that we always drain
@@ -2142,7 +2144,6 @@ reuse:
 		spin_unlock(vmf->ptl);
 		return 0;
 	}
-
 unlock_fallback:
 	folio_unlock(folio);
 	spin_unlock(vmf->ptl);
@@ -2194,19 +2195,15 @@ vm_fault_t do_huge_pmd_numa_page(struct vm_fault *vmf)
 	int flags = 0;
 
 	vmf->ptl = pmd_lock(vma->vm_mm, vmf->pmd);
-	old_pmd = pmdp_get(vmf->pmd);
+	old_pmd = pgtable_repl_get_pmd(vmf->pmd);
 
-	if (unlikely(!pmd_same(old_pmd, vmf->orig_pmd))) {
+	if (unlikely(!pmd_same(*vmf->pmd, vmf->orig_pmd))) {
 		spin_unlock(vmf->ptl);
 		return 0;
 	}
 
 	pmd = pmd_modify(old_pmd, vma->vm_page_prot);
 
-	/*
-	 * Detect now whether the PMD could be writable; this information
-	 * is only valid while holding the PT lock.
-	 */
 	writable = pmd_write(pmd);
 	if (!writable && vma_wants_manual_pte_write_upgrade(vma) &&
 	    can_change_pmd_writable(vma, vmf->address, pmd))
@@ -2226,7 +2223,6 @@ vm_fault_t do_huge_pmd_numa_page(struct vm_fault *vmf)
 		flags |= TNF_MIGRATE_FAIL;
 		goto out_map;
 	}
-	/* The folio is isolated and isolation code holds a folio reference. */
 	spin_unlock(vmf->ptl);
 	writable = false;
 
@@ -2239,13 +2235,12 @@ vm_fault_t do_huge_pmd_numa_page(struct vm_fault *vmf)
 
 	flags |= TNF_MIGRATE_FAIL;
 	vmf->ptl = pmd_lock(vma->vm_mm, vmf->pmd);
-	if (unlikely(!pmd_same(pmdp_get(vmf->pmd), vmf->orig_pmd))) {
+	if (unlikely(!pmd_same(*vmf->pmd, vmf->orig_pmd))) {
 		spin_unlock(vmf->ptl);
 		return 0;
 	}
 out_map:
-	/* Restore the PMD */
-	pmd = pmd_modify(pmdp_get(vmf->pmd), vma->vm_page_prot);
+	pmd = pmd_modify(pgtable_repl_get_pmd(vmf->pmd), vma->vm_page_prot);
 	pmd = pmd_mkyoung(pmd);
 	if (writable)
 		pmd = pmd_mkwrite(pmd, vma);
@@ -2277,7 +2272,7 @@ bool madvise_free_huge_pmd(struct mmu_gather *tlb, struct vm_area_struct *vma,
 	if (!ptl)
 		goto out_unlocked;
 
-	orig_pmd = *pmd;
+	orig_pmd = pgtable_repl_get_pmd(pmd);
 	if (is_huge_zero_pmd(orig_pmd))
 		goto out;
 
@@ -2310,20 +2305,16 @@ bool madvise_free_huge_pmd(struct mmu_gather *tlb, struct vm_area_struct *vma,
 		folio_put(folio);
 		goto out_unlocked;
 	}
-
 	if (folio_test_dirty(folio))
 		folio_clear_dirty(folio);
 	folio_unlock(folio);
-
 	if (pmd_young(orig_pmd) || pmd_dirty(orig_pmd)) {
 		pmdp_invalidate(vma, addr, pmd);
 		orig_pmd = pmd_mkold(orig_pmd);
 		orig_pmd = pmd_mkclean(orig_pmd);
-
 		set_pmd_at(mm, addr, pmd, orig_pmd);
 		tlb_remove_pmd_tlb_entry(tlb, pmd, addr);
 	}
-
 	folio_mark_lazyfree(folio);
 	ret = true;
 out:
@@ -2965,7 +2956,7 @@ static void __split_huge_zero_page_pmd(struct vm_area_struct *vma,
 	old_pmd = pmdp_huge_clear_flush(vma, haddr, pmd);
 
 	pgtable = pgtable_trans_huge_withdraw(mm, pmd);
-	pmd_populate(mm, &_pmd, pgtable);
+	pmd_populate_no_rep(mm, &_pmd, pgtable);
 
 	pte = pte_offset_map(&_pmd, haddr);
 	VM_BUG_ON(!pte);
@@ -2982,6 +2973,7 @@ static void __split_huge_zero_page_pmd(struct vm_area_struct *vma,
 	}
 	pte_unmap(pte - 1);
 	smp_wmb(); /* make pte visible before pmd */
+	pgtable_repl_free_pte_replicas(mm, pgtable);
 	pmd_populate(mm, pmd, pgtable);
 }
 
@@ -3172,7 +3164,24 @@ static void __split_huge_pmd_locked(struct vm_area_struct *vma, pmd_t *pmd,
 	 * This's critical for some architectures (Power).
 	 */
 	pgtable = pgtable_trans_huge_withdraw(mm, pmd);
-	pmd_populate(mm, &_pmd, pgtable);
+	
+	if (smp_load_acquire(&mm->repl_pgd_enabled) && virt_addr_valid(pmd)) {
+	    int pmd_node = page_to_nid(virt_to_page(pmd));
+	    int pte_node = page_to_nid(pgtable);
+	    if (pmd_node != pte_node) {
+		struct page *new_pte = mitosis_alloc_replica_page(pmd_node, 0);
+		if (new_pte && pagetable_pte_ctor(mm, page_ptdesc(new_pte))) {
+		    new_pte->pt_owner_mm = mm;
+		    pagetable_dtor(page_ptdesc(pgtable));
+		    __free_page(pgtable);
+		    pgtable = new_pte;
+		} else if (new_pte) {
+		    __free_page(new_pte);
+		}
+	    }
+	}
+	
+	pmd_populate_no_rep(mm, &_pmd, pgtable);
 
 	pte = pte_offset_map(&_pmd, haddr);
 	VM_BUG_ON(!pte);
@@ -3263,6 +3272,12 @@ static void __split_huge_pmd_locked(struct vm_area_struct *vma, pmd_t *pmd,
 		put_page(page);
 
 	smp_wmb(); /* make pte visible before pmd */
+	/*
+	 * Free stale PTE replicas that were created empty at deposit
+	 * time. pmd_populate will recreate them with current content
+	 * via paravirt_alloc_pte, then install per-node PMD pointers.
+	 */
+	pgtable_repl_free_pte_replicas(mm, pgtable);
 	pmd_populate(mm, pmd, pgtable);
 }
 
@@ -3285,6 +3300,8 @@ void __split_huge_pmd(struct vm_area_struct *vma, pmd_t *pmd,
 				(address & HPAGE_PMD_MASK) + HPAGE_PMD_SIZE);
 	mmu_notifier_invalidate_range_start(&range);
 	ptl = pmd_lock(vma->vm_mm, pmd);
+	
+	
 	split_huge_pmd_locked(vma, range.start, pmd, freeze);
 	spin_unlock(ptl);
 	mmu_notifier_invalidate_range_end(&range);
@@ -4920,30 +4937,26 @@ void remove_migration_pmd(struct page_vma_mapped_walk *pvmw, struct page *new)
 	unsigned long address = pvmw->address;
 	unsigned long haddr = address & HPAGE_PMD_MASK;
 	pmd_t pmde;
+	pmd_t pmdval;
 	softleaf_t entry;
-
 	if (!(pvmw->pmd && !pvmw->pte))
 		return;
-
-	entry = softleaf_from_pmd(*pvmw->pmd);
+	pmdval = pgtable_repl_get_pmd(pvmw->pmd);
+	entry = softleaf_from_pmd(pmdval);
 	folio_get(folio);
 	pmde = folio_mk_pmd(folio, READ_ONCE(vma->vm_page_prot));
-
-	if (pmd_swp_soft_dirty(*pvmw->pmd))
+	if (pmd_swp_soft_dirty(pmdval))
 		pmde = pmd_mksoft_dirty(pmde);
 	if (softleaf_is_migration_write(entry))
 		pmde = pmd_mkwrite(pmde, vma);
-	if (pmd_swp_uffd_wp(*pvmw->pmd))
+	if (pmd_swp_uffd_wp(pmdval))
 		pmde = pmd_mkuffd_wp(pmde);
 	if (!softleaf_is_migration_young(entry))
 		pmde = pmd_mkold(pmde);
-	/* NOTE: this may contain setting soft-dirty on some archs */
 	if (folio_test_dirty(folio) && softleaf_is_migration_dirty(entry))
 		pmde = pmd_mkdirty(pmde);
-
 	if (folio_is_device_private(folio)) {
 		swp_entry_t entry;
-
 		if (pmd_write(pmde))
 			entry = make_writable_device_private_entry(
 							page_to_pfn(new));
@@ -4951,27 +4964,21 @@ void remove_migration_pmd(struct page_vma_mapped_walk *pvmw, struct page *new)
 			entry = make_readable_device_private_entry(
 							page_to_pfn(new));
 		pmde = swp_entry_to_pmd(entry);
-
-		if (pmd_swp_soft_dirty(*pvmw->pmd))
+		if (pmd_swp_soft_dirty(pmdval))
 			pmde = pmd_swp_mksoft_dirty(pmde);
-		if (pmd_swp_uffd_wp(*pvmw->pmd))
+		if (pmd_swp_uffd_wp(pmdval))
 			pmde = pmd_swp_mkuffd_wp(pmde);
 	}
-
 	if (folio_test_anon(folio)) {
 		rmap_t rmap_flags = RMAP_NONE;
-
 		if (!softleaf_is_migration_read(entry))
 			rmap_flags |= RMAP_EXCLUSIVE;
-
 		folio_add_anon_rmap_pmd(folio, new, vma, haddr, rmap_flags);
 	} else {
 		folio_add_file_rmap_pmd(folio, new, vma);
 	}
 	VM_BUG_ON(pmd_write(pmde) && folio_test_anon(folio) && !PageAnonExclusive(new));
 	set_pmd_at(mm, haddr, pvmw->pmd, pmde);
-
-	/* No need to invalidate - it was non-present before */
 	update_mmu_cache_pmd(vma, address, pvmw->pmd);
 	trace_remove_migration_pmd(address, pmd_val(pmde));
 }

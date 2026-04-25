@@ -3507,65 +3507,49 @@ static bool walk_pte_range(pmd_t *pmd, unsigned long start, unsigned long end,
 	DEFINE_MAX_SEQ(walk->lruvec);
 	int gen = lru_gen_from_seq(max_seq);
 	pmd_t pmdval;
-
 	pte = pte_offset_map_rw_nolock(args->mm, pmd, start & PMD_MASK, &pmdval, &ptl);
 	if (!pte)
 		return false;
-
 	if (!spin_trylock(ptl)) {
 		pte_unmap(pte);
 		return true;
 	}
-
 	if (unlikely(!pmd_same(pmdval, pmdp_get_lockless(pmd)))) {
 		pte_unmap_unlock(pte, ptl);
 		return false;
 	}
-
 	lazy_mmu_mode_enable();
 restart:
 	for (i = pte_index(start), addr = start; addr != end; i++, addr += PAGE_SIZE) {
 		unsigned long pfn;
 		struct folio *folio;
-		pte_t ptent = ptep_get(pte + i);
-
+		pte_t ptent = pgtable_repl_get_pte(pte + i);
 		total++;
 		walk->mm_stats[MM_LEAF_TOTAL]++;
-
 		pfn = get_pte_pfn(ptent, args->vma, addr, pgdat);
 		if (pfn == -1)
 			continue;
-
 		folio = get_pfn_folio(pfn, memcg, pgdat);
 		if (!folio)
 			continue;
-
 		if (!ptep_clear_young_notify(args->vma, addr, pte + i))
 			continue;
-
 		if (last != folio) {
 			walk_update_folio(walk, last, gen, dirty);
-
 			last = folio;
 			dirty = false;
 		}
-
 		if (pte_dirty(ptent))
 			dirty = true;
-
 		young++;
 		walk->mm_stats[MM_LEAF_YOUNG]++;
 	}
-
 	walk_update_folio(walk, last, gen, dirty);
 	last = NULL;
-
 	if (i < PTRS_PER_PTE && get_next_vma(PMD_MASK, PAGE_SIZE, args, &start, &end))
 		goto restart;
-
 	lazy_mmu_mode_disable();
 	pte_unmap_unlock(pte, ptl);
-
 	return suitable_to_scan(total, young);
 }
 
@@ -3582,75 +3566,54 @@ static void walk_pmd_range_locked(pud_t *pud, unsigned long addr, struct vm_area
 	struct pglist_data *pgdat = lruvec_pgdat(walk->lruvec);
 	DEFINE_MAX_SEQ(walk->lruvec);
 	int gen = lru_gen_from_seq(max_seq);
-
 	VM_WARN_ON_ONCE(pud_leaf(*pud));
-
-	/* try to batch at most 1+MIN_LRU_BATCH+1 entries */
 	if (*first == -1) {
 		*first = addr;
 		bitmap_zero(bitmap, MIN_LRU_BATCH);
 		return;
 	}
-
 	i = addr == -1 ? 0 : pmd_index(addr) - pmd_index(*first);
 	if (i && i <= MIN_LRU_BATCH) {
 		__set_bit(i - 1, bitmap);
 		return;
 	}
-
 	pmd = pmd_offset(pud, *first);
-
 	ptl = pmd_lockptr(args->mm, pmd);
 	if (!spin_trylock(ptl))
 		goto done;
-
 	lazy_mmu_mode_enable();
-
 	do {
 		unsigned long pfn;
 		struct folio *folio;
-
-		/* don't round down the first address */
 		addr = i ? (*first & PMD_MASK) + i * PMD_SIZE : *first;
-
 		if (!pmd_present(pmd[i]))
 			goto next;
-
 		if (!pmd_trans_huge(pmd[i])) {
 			if (!walk->force_scan && should_clear_pmd_young() &&
 			    !mm_has_notifiers(args->mm))
 				pmdp_test_and_clear_young(vma, addr, pmd + i);
 			goto next;
 		}
-
 		pfn = get_pmd_pfn(pmd[i], vma, addr, pgdat);
 		if (pfn == -1)
 			goto next;
-
 		folio = get_pfn_folio(pfn, memcg, pgdat);
 		if (!folio)
 			goto next;
-
 		if (!pmdp_clear_young_notify(vma, addr, pmd + i))
 			goto next;
-
 		if (last != folio) {
 			walk_update_folio(walk, last, gen, dirty);
-
 			last = folio;
 			dirty = false;
 		}
-
-		if (pmd_dirty(pmd[i]))
+		if (pmd_dirty(pgtable_repl_get_pmd(pmd + i)))
 			dirty = true;
-
 		walk->mm_stats[MM_LEAF_YOUNG]++;
 next:
 		i = i > MIN_LRU_BATCH ? 0 : find_next_bit(bitmap, MIN_LRU_BATCH, i) + 1;
 	} while (i <= MIN_LRU_BATCH);
-
 	walk_update_folio(walk, last, gen, dirty);
-
 	lazy_mmu_mode_disable();
 	spin_unlock(ptl);
 done:
@@ -3669,9 +3632,7 @@ static void walk_pmd_range(pud_t *pud, unsigned long start, unsigned long end,
 	unsigned long first = -1;
 	struct lru_gen_mm_walk *walk = args->private;
 	struct lru_gen_mm_state *mm_state = get_mm_state(walk->lruvec);
-
 	VM_WARN_ON_ONCE(pud_leaf(*pud));
-
 	/*
 	 * Finish an entire PMD in two passes: the first only reaches to PTE
 	 * tables to avoid taking the PMD lock; the second, if necessary, takes
@@ -3682,50 +3643,36 @@ restart:
 	/* walk_pte_range() may call get_next_vma() */
 	vma = args->vma;
 	for (i = pmd_index(start), addr = start; addr != end; i++, addr = next) {
-		pmd_t val = pmdp_get_lockless(pmd + i);
-
+		pmd_t val = pgtable_repl_get_pmd(pmd + i);
 		next = pmd_addr_end(addr, end);
-
 		if (!pmd_present(val) || is_huge_zero_pmd(val)) {
 			walk->mm_stats[MM_LEAF_TOTAL]++;
 			continue;
 		}
-
 		if (pmd_trans_huge(val)) {
 			struct pglist_data *pgdat = lruvec_pgdat(walk->lruvec);
 			unsigned long pfn = get_pmd_pfn(val, vma, addr, pgdat);
-
 			walk->mm_stats[MM_LEAF_TOTAL]++;
-
 			if (pfn != -1)
 				walk_pmd_range_locked(pud, addr, vma, args, bitmap, &first);
 			continue;
 		}
-
 		if (!walk->force_scan && should_clear_pmd_young() &&
 		    !mm_has_notifiers(args->mm)) {
 			if (!pmd_young(val))
 				continue;
-
 			walk_pmd_range_locked(pud, addr, vma, args, bitmap, &first);
 		}
-
 		if (!walk->force_scan && !test_bloom_filter(mm_state, walk->seq, pmd + i))
 			continue;
-
 		walk->mm_stats[MM_NONLEAF_FOUND]++;
-
 		if (!walk_pte_range(&val, addr, next, args))
 			continue;
-
 		walk->mm_stats[MM_NONLEAF_ADDED]++;
-
 		/* carry over to the next generation */
 		update_bloom_filter(mm_state, walk->seq + 1, pmd + i);
 	}
-
 	walk_pmd_range_locked(pud, -1, vma, args, bitmap, &first);
-
 	if (i < PTRS_PER_PMD && get_next_vma(PUD_MASK, PMD_SIZE, args, &start, &end))
 		goto restart;
 }

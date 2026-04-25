@@ -6,6 +6,8 @@
 #include <linux/mm.h>		/* for struct page */
 #include <linux/pagemap.h>
 
+#include <asm/pgtable_repl.h>
+
 #include <asm/cpufeature.h>
 
 #define __HAVE_ARCH_PTE_ALLOC_ONE
@@ -72,6 +74,15 @@ static inline void pmd_populate_kernel_safe(struct mm_struct *mm,
 	paravirt_alloc_pte(mm, __pa(pte) >> PAGE_SHIFT);
 	set_pmd_safe(pmd, __pmd(__pa(pte) | _PAGE_TABLE));
 }
+
+static inline void pmd_populate_no_rep(struct mm_struct *mm, pmd_t *pmd,
+				       struct page *pte)
+{
+	unsigned long pfn = page_to_pfn(pte);
+
+	native_set_pmd(pmd, __pmd(((pteval_t)pfn << PAGE_SHIFT) | _PAGE_TABLE));
+}
+
 
 static inline void pmd_populate(struct mm_struct *mm, pmd_t *pmd,
 				struct page *pte)
