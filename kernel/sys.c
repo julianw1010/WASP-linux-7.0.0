@@ -2915,10 +2915,9 @@ SYSCALL_DEFINE5(prctl, int, option, unsigned long, arg2, unsigned long, arg3,
 		nodemask_t nodes;
 		struct mm_struct *mm = NULL;
 		struct task_struct *task = NULL;
-		int ret;
 		int node;
 		int valid_nodes = 0;
-		int max_node = min(NUMA_NODE_COUNT, (int)BITS_PER_LONG);
+		int max_node = min_t(int, NUMA_NODE_COUNT, BITS_PER_LONG);
 		bool is_external = (arg3 != 0);
 
 		if (is_external) {
@@ -3006,20 +3005,15 @@ SYSCALL_DEFINE5(prctl, int, option, unsigned long, arg2, unsigned long, arg3,
 			goto out_put_mm;
 		}
 
-		if (is_external) {
-			ret = pgtable_repl_enable_external(task, nodes);
-		} else {
-			ret = pgtable_repl_enable(mm, nodes);
-		}
+		if (is_external)
+			error = pgtable_repl_enable_external(task, nodes);
+		else
+			error = pgtable_repl_enable(mm, nodes);
 
-		if (ret) {
-			error = ret;
-		} else {
+		if (!error)
 			flush_tlb_mm(mm);
-			error = 0;
-		}
 
-	out_put_mm:
+out_put_mm:
 		if (mm)
 			mmput(mm);
 		if (is_external && task)
@@ -3030,7 +3024,7 @@ SYSCALL_DEFINE5(prctl, int, option, unsigned long, arg2, unsigned long, arg3,
 	{
 		unsigned long mask = 0;
 		int node;
-		int max_node = min(NUMA_NODE_COUNT, (int)BITS_PER_LONG);
+		int max_node = min_t(int, NUMA_NODE_COUNT, BITS_PER_LONG);
 
 		if (current->mm && current->mm->repl_pgd_enabled) {
 			for_each_node_mask(node, current->mm->repl_pgd_nodes) {
@@ -3078,6 +3072,7 @@ SYSCALL_DEFINE5(prctl, int, option, unsigned long, arg2, unsigned long, arg3,
 			break;
 		}
 
+		/* Pairs with smp_store_release() in pgtable_repl_enable */
 		if (enable && smp_load_acquire(&mm->repl_pgd_enabled)) {
 			error = -EBUSY;
 			mmput(mm);
@@ -3194,13 +3189,17 @@ SYSCALL_DEFINE5(prctl, int, option, unsigned long, arg2, unsigned long, arg3,
 			break;
 		}
 
-		if (!smp_load_acquire(&mm->repl_pgd_enabled)) {
+		/* Pairs with smp_store_release() in pgtable_repl_enable */
+		bool enabled = smp_load_acquire(&mm->repl_pgd_enabled);
+
+		if (!enabled) {
 			error = -EINVAL;
 			goto out_put_mm_steering;
 		}
 
 		for (i = 0; i < NUMA_NODE_COUNT; i++) {
 			int target = steering[i];
+
 			if (target >= 0) {
 				if (!node_isset(target, mm->repl_pgd_nodes) ||
 				    mm->pgd_replicas[target] == NULL) {
@@ -3218,6 +3217,7 @@ SYSCALL_DEFINE5(prctl, int, option, unsigned long, arg2, unsigned long, arg3,
 
 		if (steering_changed) {
 			nodemask_t changed_nodes;
+
 			nodes_clear(changed_nodes);
 
 			for (i = 0; i < NUMA_NODE_COUNT; i++) {
@@ -3225,6 +3225,8 @@ SYSCALL_DEFINE5(prctl, int, option, unsigned long, arg2, unsigned long, arg3,
 				if (old_steering[i] != steering[i])
 					node_set(i, changed_nodes);
 			}
+
+			/* Ensure steering updates visible before IPI */
 			smp_wmb();
 
 			pgtable_repl_force_steering_switch(mm, &changed_nodes);
@@ -3232,7 +3234,7 @@ SYSCALL_DEFINE5(prctl, int, option, unsigned long, arg2, unsigned long, arg3,
 
 		error = 0;
 
-	out_put_mm_steering:
+out_put_mm_steering:
 		if (mm)
 			mmput(mm);
 		if (!is_self && task)

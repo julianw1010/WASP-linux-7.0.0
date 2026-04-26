@@ -777,6 +777,86 @@ static inline void cr4_update_pce_mm(struct mm_struct *mm) { }
 #endif
 
 /*
+ * Select the NUMA-local PGD replica for the given mm, or return NULL
+ * if replication is inactive or no valid replica exists.
+ */
+static pgd_t *mitosis_select_replica(struct mm_struct *mm, int local_node)
+{
+	bool enabled, in_prog;
+	int steered_node, target_node;
+	pgd_t *node_pgd;
+	struct page *pgd_page;
+	unsigned long pa;
+
+	/* Pairs with smp_store_release() in pgtable_repl_enable/disable */
+	enabled = smp_load_acquire(&mm->repl_pgd_enabled);
+	if (!enabled)
+		return NULL;
+
+	/* Pairs with smp_store_release() in pgtable_repl_enable */
+	in_prog = smp_load_acquire(&mm->repl_in_progress);
+	if (in_prog)
+		return NULL;
+
+	steered_node = READ_ONCE(mm->repl_steering[local_node]);
+	if (steered_node >= 0 && steered_node < MAX_NUMNODES)
+		target_node = steered_node;
+	else
+		target_node = local_node;
+
+	node_pgd = READ_ONCE(mm->pgd_replicas[target_node]);
+	if (!node_pgd || !virt_addr_valid(node_pgd))
+		return NULL;
+
+	/* Re-check: replication may have been disabled concurrently */
+	enabled = smp_load_acquire(&mm->repl_pgd_enabled);
+	/* Pairs with smp_store_release() in pgtable_repl_enable */
+	in_prog = smp_load_acquire(&mm->repl_in_progress);
+	if (!enabled || in_prog)
+		return NULL;
+
+	pgd_page = virt_to_page(node_pgd);
+	if (!pgd_page || page_to_nid(pgd_page) != target_node)
+		return NULL;
+
+	pa = __pa(node_pgd);
+	if (!pa || !pfn_valid(pa >> PAGE_SHIFT))
+		return NULL;
+
+	return node_pgd;
+}
+
+/*
+ * Attempt to switch CR3 to the selected replica. Returns true if the
+ * switch was performed or the CR3 already points to the replica.
+ */
+static bool mitosis_try_cr3_switch(struct mm_struct *mm, pgd_t *replica)
+{
+	unsigned long cur_cr3_pa, tgt_cr3_pa;
+	bool enabled, in_prog;
+
+	cur_cr3_pa = __read_cr3() & PAGE_MASK;
+	tgt_cr3_pa = __pa(replica);
+
+	if (cur_cr3_pa == tgt_cr3_pa)
+		return false;
+
+	/* Pairs with smp_store_release() in pgtable_repl_enable */
+	enabled = smp_load_acquire(&mm->repl_pgd_enabled);
+	/* Pairs with smp_store_release() in pgtable_repl_enable */
+	in_prog = smp_load_acquire(&mm->repl_in_progress);
+
+	if (enabled && !in_prog) {
+		unsigned long new_cr3;
+
+		new_cr3 = tgt_cr3_pa | (__read_cr3() & ~PAGE_MASK);
+		native_write_cr3(new_cr3);
+		__flush_tlb_all();
+	}
+	return true;
+}
+
+/*
  * This optimizes when not actually switching mm's.  Some architectures use the
  * 'unused' argument for this optimization, but x86 must use
  * 'cpu_tlbstate.loaded_mm' instead because it does not always keep
@@ -795,64 +875,21 @@ void switch_mm_irqs_off(struct mm_struct *unused, struct mm_struct *next,
 	pgd_t *pgd_to_use;
 	bool using_replica = false;
 	bool rcu_held = false;
-	int local_node;
-	int target_node;
-	bool repl_enabled;
-	bool repl_in_progress;
-	pgd_t *selected_replica = NULL;
-
-	local_node = numa_node_id();
+	pgd_t *selected_replica;
 
 	rcu_read_lock();
 	rcu_held = true;
 
-	repl_enabled = smp_load_acquire(&next->repl_pgd_enabled);
-	pgd_to_use = next->pgd;
-
-	if (repl_enabled) {
-		repl_in_progress = smp_load_acquire(&next->repl_in_progress);
-
-		if (!repl_in_progress) {
-			pgd_t *node_pgd;
-			int steered_node;
-
-			steered_node = READ_ONCE(next->repl_steering[local_node]);
-			if (steered_node >= 0 && steered_node < MAX_NUMNODES)
-				target_node = steered_node;
-			else
-				target_node = local_node;
-
-			node_pgd = READ_ONCE(next->pgd_replicas[target_node]);
-
-			if (node_pgd && virt_addr_valid(node_pgd)) {
-				if (smp_load_acquire(&next->repl_pgd_enabled) &&
-				    !smp_load_acquire(&next->repl_in_progress)) {
-					struct page *pgd_page = virt_to_page(node_pgd);
-
-					if (pgd_page && page_to_nid(pgd_page) == target_node) {
-						unsigned long pa = __pa(node_pgd);
-						if (pa && pfn_valid(pa >> PAGE_SHIFT)) {
-							selected_replica = node_pgd;
-							pgd_to_use = node_pgd;
-							using_replica = (node_pgd != next->pgd);
-						}
-					}
-				}
-			}
-		}
+	selected_replica = mitosis_select_replica(next, numa_node_id());
+	if (selected_replica) {
+		pgd_to_use = selected_replica;
+		using_replica = (selected_replica != next->pgd);
+	} else {
+		pgd_to_use = next->pgd;
 	}
 
 	if (IS_ENABLED(CONFIG_PROVE_LOCKING))
 		WARN_ON_ONCE(!irqs_disabled());
-
-#if 0
-#ifdef CONFIG_DEBUG_VM
-	if (WARN_ON_ONCE(__read_cr3() != build_cr3(prev->pgd, prev_asid,
-						   tlbstate_lam_cr3_mask()))) {
-		__flush_tlb_all();
-	}
-#endif
-#endif
 
 	if (was_lazy)
 		this_cpu_write(cpu_tlbstate_shared.is_lazy, false);
@@ -863,12 +900,15 @@ void switch_mm_irqs_off(struct mm_struct *unused, struct mm_struct *next,
 			   next->context.ctx_id);
 
 		if (IS_ENABLED(CONFIG_DEBUG_VM) &&
-		    WARN_ON_ONCE(prev != &init_mm && !is_notrack_mm(prev) &&
-				 !cpumask_test_cpu(cpu, mm_cpumask(next))))
+		    WARN_ON_ONCE(prev != &init_mm &&
+				 !is_notrack_mm(prev) &&
+				 !cpumask_test_cpu(cpu,
+						   mm_cpumask(next))))
 			cpumask_set_cpu(cpu, mm_cpumask(next));
 
 		if (mm_needs_global_asid(next, prev_asid)) {
-			next_tlb_gen = atomic64_read(&next->context.tlb_gen);
+			next_tlb_gen =
+				atomic64_read(&next->context.tlb_gen);
 			ns = choose_new_asid(next, next_tlb_gen);
 			goto reload_tlb;
 		}
@@ -880,29 +920,33 @@ void switch_mm_irqs_off(struct mm_struct *unused, struct mm_struct *next,
 		}
 
 		if (selected_replica) {
-			unsigned long current_cr3_pa = __read_cr3() & PAGE_MASK;
-			unsigned long target_cr3_pa = __pa(selected_replica);
-
-			if (current_cr3_pa != target_cr3_pa) {
-				if (smp_load_acquire(&next->repl_pgd_enabled) &&
-				    !smp_load_acquire(&next->repl_in_progress)) {
-					unsigned long new_cr3 = target_cr3_pa | (__read_cr3() & ~PAGE_MASK);
-					native_write_cr3(new_cr3);
-					__flush_tlb_all();
-				}
+			if (mitosis_try_cr3_switch(next,
+						   selected_replica)) {
 				rcu_read_unlock();
 				return;
 			}
-		} else if (repl_enabled) {
-			unsigned long current_cr3_pa = __read_cr3() & PAGE_MASK;
-			unsigned long primary_cr3_pa = __pa(next->pgd);
+		} else {
+			/* Pairs with smp_store_release() in pgtable_repl_enable */
+			bool repl_on = smp_load_acquire(&next->repl_pgd_enabled);
 
-			if (current_cr3_pa != primary_cr3_pa) {
-				unsigned long new_cr3 = primary_cr3_pa | (__read_cr3() & ~PAGE_MASK);
-				native_write_cr3(new_cr3);
-				__flush_tlb_all();
-				rcu_read_unlock();
-				return;
+			if (repl_on) {
+				unsigned long cur_cr3_pa;
+				unsigned long pri_cr3_pa;
+
+				cur_cr3_pa = __read_cr3() & PAGE_MASK;
+				pri_cr3_pa = __pa(next->pgd);
+
+				if (cur_cr3_pa != pri_cr3_pa) {
+					unsigned long new_cr3;
+
+					new_cr3 = pri_cr3_pa |
+						  (__read_cr3() &
+						   ~PAGE_MASK);
+					native_write_cr3(new_cr3);
+					__flush_tlb_all();
+					rcu_read_unlock();
+					return;
+				}
 			}
 		}
 
@@ -926,9 +970,11 @@ void switch_mm_irqs_off(struct mm_struct *unused, struct mm_struct *next,
 	} else {
 		cond_mitigation(tsk);
 
-		this_cpu_write(cpu_tlbstate.loaded_mm, LOADED_MM_SWITCHING);
+		this_cpu_write(cpu_tlbstate.loaded_mm,
+			       LOADED_MM_SWITCHING);
 
-		if (next != &init_mm && !cpumask_test_cpu(cpu, mm_cpumask(next)))
+		if (next != &init_mm &&
+		    !cpumask_test_cpu(cpu, mm_cpumask(next)))
 			cpumask_set_cpu(cpu, mm_cpumask(next));
 		else
 			smp_mb();
@@ -940,8 +986,12 @@ void switch_mm_irqs_off(struct mm_struct *unused, struct mm_struct *next,
 
 reload_tlb:
 	if (selected_replica) {
-		if (!smp_load_acquire(&next->repl_pgd_enabled) ||
-		    smp_load_acquire(&next->repl_in_progress)) {
+		/* Pairs with smp_store_release() in pgtable_repl_enable */
+		bool enabled = smp_load_acquire(&next->repl_pgd_enabled);
+		/* Pairs with smp_store_release() in pgtable_repl_enable */
+		bool in_prog = smp_load_acquire(&next->repl_in_progress);
+
+		if (!enabled || in_prog) {
 			pgd_to_use = next->pgd;
 			using_replica = false;
 			selected_replica = NULL;
@@ -951,10 +1001,13 @@ reload_tlb:
 	new_lam = mm_lam_cr3_mask(next);
 	if (ns.need_flush) {
 		VM_WARN_ON_ONCE(is_global_asid(ns.asid));
-		this_cpu_write(cpu_tlbstate.ctxs[ns.asid].ctx_id, next->context.ctx_id);
-		this_cpu_write(cpu_tlbstate.ctxs[ns.asid].tlb_gen, next_tlb_gen);
+		this_cpu_write(cpu_tlbstate.ctxs[ns.asid].ctx_id,
+			       next->context.ctx_id);
+		this_cpu_write(cpu_tlbstate.ctxs[ns.asid].tlb_gen,
+			       next_tlb_gen);
 		load_new_mm_cr3(pgd_to_use, ns.asid, new_lam, true);
-		trace_tlb_flush(TLB_FLUSH_ON_TASK_SWITCH, TLB_FLUSH_ALL);
+		trace_tlb_flush(TLB_FLUSH_ON_TASK_SWITCH,
+				TLB_FLUSH_ALL);
 	} else {
 		load_new_mm_cr3(pgd_to_use, ns.asid, new_lam, false);
 		trace_tlb_flush(TLB_FLUSH_ON_TASK_SWITCH, 0);

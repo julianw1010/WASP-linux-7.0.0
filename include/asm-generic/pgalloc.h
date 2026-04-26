@@ -49,10 +49,16 @@ static inline void mitosis_ctor_fail(struct page *page, struct ptdesc *ptdesc,
 
 static inline bool mitosis_active(struct mm_struct *mm)
 {
-	return mm && mm != &init_mm &&
-	       (smp_load_acquire(&mm->repl_pgd_enabled) ||
-		READ_ONCE(mm->cache_only_mode) ||
-		sysctl_mitosis_mode == 0);
+	bool repl;
+
+	if (!mm || mm == &init_mm)
+		return false;
+
+	/* Pairs with smp_store_release() in pgtable_repl_enable/disable */
+	repl = smp_load_acquire(&mm->repl_pgd_enabled);
+
+	return repl || READ_ONCE(mm->cache_only_mode) ||
+	       sysctl_mitosis_mode == 0;
 }
 
 static inline pte_t *__pte_alloc_one_kernel_noprof(struct mm_struct *mm)

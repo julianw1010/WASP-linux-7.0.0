@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 #include <linux/mm.h>
 #include <linux/sched.h>
 #include <asm/pgtable.h>
@@ -36,14 +37,18 @@ void mitosis_verify_fault_walk(struct mm_struct *mm, unsigned long address)
 		return;
 
 	if (pgtable_l5_enabled()) {
-		unsigned long child_phys = pgd_val(*pgd) & PTE_PFN_MASK;
+		unsigned long child_phys;
+
+		child_phys = pgd_val(*pgd) & PTE_PFN_MASK;
 		if (child_phys && pfn_valid(child_phys >> PAGE_SHIFT)) {
-			pg_node = page_to_nid(pfn_to_page(child_phys >> PAGE_SHIFT));
+			pg_node = page_to_nid(
+				pfn_to_page(child_phys >> PAGE_SHIFT));
 			if (pg_node != expected_node) {
-				pr_err("MITOSIS: fault verify: P4D on node %d expected %d (CR3=0x%lx) addr=0x%lx comm=%s pid=%d\n",
-				       pg_node, expected_node, cr3_pa, address,
+				pr_err("MITOSIS: fault verify: P4D on node %d expected %d addr=0x%lx comm=%s pid=%d\n",
+				       pg_node, expected_node, address,
 				       current->comm, current->pid);
-				BUG();
+				WARN_ON_ONCE(1);
+				return;
 			}
 		}
 	}
@@ -53,14 +58,18 @@ void mitosis_verify_fault_walk(struct mm_struct *mm, unsigned long address)
 		return;
 
 	{
-		unsigned long pud_phys = p4d_val(*p4d) & PTE_PFN_MASK;
+		unsigned long pud_phys;
+
+		pud_phys = p4d_val(*p4d) & PTE_PFN_MASK;
 		if (pud_phys && pfn_valid(pud_phys >> PAGE_SHIFT)) {
-			pg_node = page_to_nid(pfn_to_page(pud_phys >> PAGE_SHIFT));
+			pg_node = page_to_nid(
+				pfn_to_page(pud_phys >> PAGE_SHIFT));
 			if (pg_node != expected_node) {
-				pr_err("MITOSIS: fault verify: PUD on node %d expected %d (CR3=0x%lx) addr=0x%lx comm=%s pid=%d\n",
-				       pg_node, expected_node, cr3_pa, address,
+				pr_err("MITOSIS: fault verify: PUD on node %d expected %d addr=0x%lx comm=%s pid=%d\n",
+				       pg_node, expected_node, address,
 				       current->comm, current->pid);
-				BUG();
+				WARN_ON_ONCE(1);
+				return;
 			}
 		}
 	}
@@ -70,14 +79,18 @@ void mitosis_verify_fault_walk(struct mm_struct *mm, unsigned long address)
 		return;
 
 	{
-		unsigned long pmd_phys = pud_val(*pud) & PTE_PFN_MASK;
+		unsigned long pmd_phys;
+
+		pmd_phys = pud_val(*pud) & PTE_PFN_MASK;
 		if (pmd_phys && pfn_valid(pmd_phys >> PAGE_SHIFT)) {
-			pg_node = page_to_nid(pfn_to_page(pmd_phys >> PAGE_SHIFT));
+			pg_node = page_to_nid(
+				pfn_to_page(pmd_phys >> PAGE_SHIFT));
 			if (pg_node != expected_node) {
-				pr_err("MITOSIS: fault verify: PMD on node %d expected %d (CR3=0x%lx) addr=0x%lx comm=%s pid=%d\n",
-				       pg_node, expected_node, cr3_pa, address,
+				pr_err("MITOSIS: fault verify: PMD on node %d expected %d addr=0x%lx comm=%s pid=%d\n",
+				       pg_node, expected_node, address,
 				       current->comm, current->pid);
-				BUG();
+				WARN_ON_ONCE(1);
+				return;
 			}
 		}
 	}
@@ -92,10 +105,10 @@ void mitosis_verify_fault_walk(struct mm_struct *mm, unsigned long address)
 
 	pg_node = page_to_nid(virt_to_page(pte));
 	if (pg_node != expected_node) {
-		pr_err("MITOSIS: fault verify: PTE on node %d expected %d (CR3=0x%lx) addr=0x%lx comm=%s pid=%d\n",
-		       pg_node, expected_node, cr3_pa, address,
+		pr_err("MITOSIS: fault verify: PTE on node %d expected %d addr=0x%lx comm=%s pid=%d\n",
+		       pg_node, expected_node, address,
 		       current->comm, current->pid);
-		BUG();
+		WARN_ON_ONCE(1);
 	}
 }
 EXPORT_SYMBOL(mitosis_verify_fault_walk);

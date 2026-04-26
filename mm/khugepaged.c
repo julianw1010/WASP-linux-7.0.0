@@ -1219,7 +1219,7 @@ static enum scan_result collapse_huge_page(struct mm_struct *mm, unsigned long a
 	spin_unlock(pmd_ptl);
 
 	folio = NULL;
-	
+
 
 	result = SCAN_SUCCEED;
 out_up_write:

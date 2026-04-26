@@ -896,9 +896,9 @@ static int exec_mmap(struct mm_struct *mm)
 
 		return 0;
 	}
-	
+
 	mmdrop_lazy_tlb(active_mm);
-	
+
 	return 0;
 }
 
@@ -1461,9 +1461,9 @@ static struct linux_binprm *alloc_bprm(int fd, struct filename *filename, int fl
 
 	retval = bprm_mm_init(bprm);
 	if (!retval) {
-		if (current->mm) {
+		if (current->mm)
 			bprm->mm->cache_only_mode = current->mm->cache_only_mode;
-		}
+
 
 		if (current->mm && current->mm->repl_pgd_enabled &&
 		    !nodes_empty(current->mm->repl_pgd_nodes)) {
@@ -1782,7 +1782,7 @@ static int bprm_execve(struct linux_binprm *bprm)
 		current->mm->repl_pending_enable = false;
 		nodes_clear(current->mm->repl_pending_nodes);
 	}
-	
+
 	return retval;
 
 out:

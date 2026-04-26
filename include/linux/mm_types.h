@@ -1159,7 +1159,7 @@ struct mm_struct {
 #endif
 		unsigned long task_size;	/* size of task vm space */
 
-                bool repl_pgd_enabled;
+		bool repl_pgd_enabled;
 		bool repl_in_progress;
 		bool repl_pending_enable;
 		bool cache_only_mode;
@@ -1174,8 +1174,8 @@ struct mm_struct {
 		int repl_steering[NUMA_NODE_COUNT];
 
 		atomic_t pgtable_interleave_counter;
-		
-		
+
+
 		pgd_t * pgd;
 
 #ifdef CONFIG_MEMBARRIER

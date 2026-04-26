@@ -48,7 +48,7 @@
 #define CREATE_TRACE_POINTS
 #include <trace/events/thp.h>
 
-#include <asm/pgalloc.h>
+#include <linux/pgalloc.h>
 
 #include <asm/pgtable_repl.h>
 
@@ -3164,23 +3164,30 @@ static void __split_huge_pmd_locked(struct vm_area_struct *vma, pmd_t *pmd,
 	 * This's critical for some architectures (Power).
 	 */
 	pgtable = pgtable_trans_huge_withdraw(mm, pmd);
-	
-	if (smp_load_acquire(&mm->repl_pgd_enabled) && virt_addr_valid(pmd)) {
-	    int pmd_node = page_to_nid(virt_to_page(pmd));
-	    int pte_node = page_to_nid(pgtable);
-	    if (pmd_node != pte_node) {
-		struct page *new_pte = mitosis_alloc_replica_page(pmd_node, 0);
-		if (new_pte && pagetable_pte_ctor(mm, page_ptdesc(new_pte))) {
-		    new_pte->pt_owner_mm = mm;
-		    pagetable_dtor(page_ptdesc(pgtable));
-		    __free_page(pgtable);
-		    pgtable = new_pte;
-		} else if (new_pte) {
-		    __free_page(new_pte);
+
+	/* Pairs with smp_store_release() in pgtable_repl_enable */
+	bool repl_enabled = smp_load_acquire(&mm->repl_pgd_enabled);
+
+	if (repl_enabled && virt_addr_valid(pmd)) {
+		int pmd_node = page_to_nid(virt_to_page(pmd));
+		int pte_node = page_to_nid(pgtable);
+
+		if (pmd_node != pte_node) {
+			struct page *new_pte;
+
+			new_pte = mitosis_alloc_replica_page(pmd_node, 0);
+			if (new_pte &&
+			    pagetable_pte_ctor(mm, page_ptdesc(new_pte))) {
+				new_pte->pt_owner_mm = mm;
+				pagetable_dtor(page_ptdesc(pgtable));
+				__free_page(pgtable);
+				pgtable = new_pte;
+			} else if (new_pte) {
+				__free_page(new_pte);
+			}
 		}
-	    }
 	}
-	
+
 	pmd_populate_no_rep(mm, &_pmd, pgtable);
 
 	pte = pte_offset_map(&_pmd, haddr);
@@ -3300,8 +3307,8 @@ void __split_huge_pmd(struct vm_area_struct *vma, pmd_t *pmd,
 				(address & HPAGE_PMD_MASK) + HPAGE_PMD_SIZE);
 	mmu_notifier_invalidate_range_start(&range);
 	ptl = pmd_lock(vma->vm_mm, pmd);
-	
-	
+
+
 	split_huge_pmd_locked(vma, range.start, pmd, freeze);
 	spin_unlock(ptl);
 	mmu_notifier_invalidate_range_end(&range);

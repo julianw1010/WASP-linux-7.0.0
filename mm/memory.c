@@ -6624,8 +6624,9 @@ vm_fault_t handle_mm_fault(struct vm_area_struct *vma, unsigned long address,
 	else
 		ret = __handle_mm_fault(vma, address, flags);
 
+	/* Pairs with smp_store_release() in pgtable_repl_enable/disable */
 	if (smp_load_acquire(&vma->vm_mm->repl_pgd_enabled) &&
-		!(ret & (VM_FAULT_ERROR | VM_FAULT_RETRY)))
+	    !(ret & (VM_FAULT_ERROR | VM_FAULT_RETRY)))
 		mitosis_verify_fault_walk(vma->vm_mm, address);
 
 	/*

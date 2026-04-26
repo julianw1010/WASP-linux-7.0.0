@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 #include <linux/mm.h>
 #include <linux/gfp.h>
 #include <linux/spinlock.h>
@@ -109,14 +110,12 @@ int mitosis_cache_drain_node(int node)
 }
 EXPORT_SYMBOL(mitosis_cache_drain_node);
 
-
 int mitosis_cache_drain_all(void)
 {
 	int node, total = 0;
 
-	for (node = 0; node < NUMA_NODE_COUNT; node++) {
+	for (node = 0; node < NUMA_NODE_COUNT; node++)
 		total += mitosis_cache_drain_node(node);
-	}
 
 	return total;
 }
@@ -124,50 +123,52 @@ EXPORT_SYMBOL(mitosis_cache_drain_all);
 
 void mitosis_defer_pte_page_free(struct mm_struct *mm, struct page *page)
 {
-    unsigned long flags;
+	unsigned long flags;
 
-    WRITE_ONCE(page->pt_replica, NULL);
-    pagetable_dtor(page_ptdesc(page));
-    page->pt_owner_mm = NULL;
+	WRITE_ONCE(page->pt_replica, NULL);
+	pagetable_dtor(page_ptdesc(page));
+	page->pt_owner_mm = NULL;
 
-    if (!mm) {
-        ClearPageMitosisFromCache(page);
-        __free_page(page);
-        return;
-    }
+	if (!mm) {
+		ClearPageMitosisFromCache(page);
+		__free_page(page);
+		return;
+	}
 
-    spin_lock_irqsave(&mm->mitosis_deferred_lock, flags);
-    page->pt_replica = mm->mitosis_deferred_pages;
-    mm->mitosis_deferred_pages = page;
-    spin_unlock_irqrestore(&mm->mitosis_deferred_lock, flags);
+	spin_lock_irqsave(&mm->mitosis_deferred_lock, flags);
+	page->pt_replica = mm->mitosis_deferred_pages;
+	mm->mitosis_deferred_pages = page;
+	spin_unlock_irqrestore(&mm->mitosis_deferred_lock, flags);
 }
 EXPORT_SYMBOL(mitosis_defer_pte_page_free);
 
 void mitosis_drain_deferred_pages(struct mm_struct *mm)
 {
-    struct page *page, *next;
-    unsigned long flags;
+	struct page *page, *next;
+	unsigned long flags;
 
-    if (!mm || !READ_ONCE(mm->mitosis_deferred_pages))
-        return;
+	if (!mm || !READ_ONCE(mm->mitosis_deferred_pages))
+		return;
 
-    spin_lock_irqsave(&mm->mitosis_deferred_lock, flags);
-    page = mm->mitosis_deferred_pages;
-    mm->mitosis_deferred_pages = NULL;
-    spin_unlock_irqrestore(&mm->mitosis_deferred_lock, flags);
+	spin_lock_irqsave(&mm->mitosis_deferred_lock, flags);
+	page = mm->mitosis_deferred_pages;
+	mm->mitosis_deferred_pages = NULL;
+	spin_unlock_irqrestore(&mm->mitosis_deferred_lock, flags);
 
-    while (page) {
-        int nid = page_to_nid(page);
-        bool from_cache = PageMitosisFromCache(page);
-        next = page->pt_replica;
-        page->pt_replica = NULL;
-        ClearPageMitosisFromCache(page);
-        if (from_cache && mitosis_cache_push(page, nid, MITOSIS_CACHE_PTE)) {
-            page = next;
-            continue;
-        }
-        __free_page(page);
-        page = next;
-    }
+	while (page) {
+		int nid = page_to_nid(page);
+		bool from_cache = PageMitosisFromCache(page);
+
+		next = page->pt_replica;
+		page->pt_replica = NULL;
+		ClearPageMitosisFromCache(page);
+		if (from_cache &&
+		    mitosis_cache_push(page, nid, MITOSIS_CACHE_PTE)) {
+			page = next;
+			continue;
+		}
+		__free_page(page);
+		page = next;
+	}
 }
 EXPORT_SYMBOL(mitosis_drain_deferred_pages);

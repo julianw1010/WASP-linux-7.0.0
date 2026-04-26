@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 #include <linux/mm.h>
 #include <linux/gfp.h>
 #include <linux/page-flags.h>
@@ -9,30 +10,36 @@
 
 struct page *mitosis_alloc_replica_page(int node, int order)
 {
-    struct page *page;
-    int dummy_level = 0;
+	struct page *page;
+	int dummy_level = 0;
 
+	if (order == 0) {
+		page = mitosis_cache_pop(node, dummy_level);
+		if (page) {
+			if (WARN_ON_ONCE(page_to_nid(page) != node)) {
+				__free_page(page);
+				return NULL;
+			}
+			return page;
+		}
+	}
 
-    if (order == 0) {
-        page = mitosis_cache_pop(node, dummy_level);
-        if (page) {
-            BUG_ON(page_to_nid(page) != node);
-            return page;
-        }
-    }
+	page = alloc_pages_node(node,
+		GFP_NOWAIT | GFP_ATOMIC | __GFP_ZERO | __GFP_THISNODE, order);
 
+	if (WARN_ON_ONCE(!page))
+		return NULL;
+	if (WARN_ON_ONCE(page_to_nid(page) != node)) {
+		__free_pages(page, order);
+		return NULL;
+	}
 
-    page = alloc_pages_node(node,
-        GFP_NOWAIT | GFP_ATOMIC | __GFP_ZERO | __GFP_THISNODE, order);
-
-    BUG_ON(!page);
-    BUG_ON(page_to_nid(page) != node);
-
-    return page;
+	return page;
 }
+EXPORT_SYMBOL(mitosis_alloc_replica_page);
 
 int alloc_pte_replicas(struct page *base_page, struct mm_struct *mm,
-                              struct page **pages, int *count)
+		       struct page **pages, int *count)
 {
 	int i;
 	int base_node;
@@ -44,6 +51,7 @@ int alloc_pte_replicas(struct page *base_page, struct mm_struct *mm,
 
 	*count = 0;
 
+	/* Pairs with smp_store_release() in pgtable_repl_enable() */
 	if (!smp_load_acquire(&mm->repl_pgd_enabled))
 		return -EAGAIN;
 
@@ -67,8 +75,13 @@ int alloc_pte_replicas(struct page *base_page, struct mm_struct *mm,
 			continue;
 
 		new_page = mitosis_alloc_replica_page(i, 0);
+		if (!new_page)
+			return -ENOMEM;
 
-		BUG_ON(!pagetable_pte_ctor(mm, page_ptdesc(new_page)));
+		if (WARN_ON_ONCE(!pagetable_pte_ctor(mm, page_ptdesc(new_page)))) {
+			__free_page(new_page);
+			return -ENOMEM;
+		}
 
 		new_page->pt_owner_mm = mm;
 		mm_inc_nr_ptes(mm);
@@ -80,7 +93,7 @@ int alloc_pte_replicas(struct page *base_page, struct mm_struct *mm,
 }
 
 int alloc_pmd_replicas(struct page *base_page, struct mm_struct *mm,
-                              struct page **pages, int *count)
+		       struct page **pages, int *count)
 {
 	int i;
 	int base_node;
@@ -92,6 +105,7 @@ int alloc_pmd_replicas(struct page *base_page, struct mm_struct *mm,
 
 	*count = 0;
 
+	/* Pairs with smp_store_release() in pgtable_repl_enable() */
 	if (!smp_load_acquire(&mm->repl_pgd_enabled))
 		return -EAGAIN;
 
@@ -115,8 +129,13 @@ int alloc_pmd_replicas(struct page *base_page, struct mm_struct *mm,
 			continue;
 
 		new_page = mitosis_alloc_replica_page(i, 0);
+		if (!new_page)
+			return -ENOMEM;
 
-		BUG_ON(!pagetable_pmd_ctor(mm, page_ptdesc(new_page)));
+		if (WARN_ON_ONCE(!pagetable_pmd_ctor(mm, page_ptdesc(new_page)))) {
+			__free_page(new_page);
+			return -ENOMEM;
+		}
 
 		new_page->pt_owner_mm = mm;
 		mm_inc_nr_pmds(mm);
@@ -128,7 +147,7 @@ int alloc_pmd_replicas(struct page *base_page, struct mm_struct *mm,
 }
 
 int alloc_pud_replicas(struct page *base_page, struct mm_struct *mm,
-                              struct page **pages, int *count)
+		       struct page **pages, int *count)
 {
 	int i;
 	int base_node;
@@ -140,6 +159,7 @@ int alloc_pud_replicas(struct page *base_page, struct mm_struct *mm,
 
 	*count = 0;
 
+	/* Pairs with smp_store_release() in pgtable_repl_enable() */
 	if (!smp_load_acquire(&mm->repl_pgd_enabled))
 		return -EAGAIN;
 
@@ -163,6 +183,8 @@ int alloc_pud_replicas(struct page *base_page, struct mm_struct *mm,
 			continue;
 
 		new_page = mitosis_alloc_replica_page(i, 0);
+		if (!new_page)
+			return -ENOMEM;
 
 		new_page->pt_owner_mm = mm;
 		mm_inc_nr_puds(mm);
@@ -174,7 +196,7 @@ int alloc_pud_replicas(struct page *base_page, struct mm_struct *mm,
 }
 
 int alloc_p4d_replicas(struct page *base_page, struct mm_struct *mm,
-                              struct page **pages, int *count)
+		       struct page **pages, int *count)
 {
 	int i;
 	int base_node;
@@ -186,6 +208,7 @@ int alloc_p4d_replicas(struct page *base_page, struct mm_struct *mm,
 
 	*count = 0;
 
+	/* Pairs with smp_store_release() in pgtable_repl_enable() */
 	if (!smp_load_acquire(&mm->repl_pgd_enabled))
 		return -EAGAIN;
 
@@ -209,6 +232,8 @@ int alloc_p4d_replicas(struct page *base_page, struct mm_struct *mm,
 			continue;
 
 		new_page = mitosis_alloc_replica_page(i, 0);
+		if (!new_page)
+			return -ENOMEM;
 
 		new_page->pt_owner_mm = mm;
 		WRITE_ONCE(new_page->pt_replica, NULL);
@@ -219,8 +244,7 @@ int alloc_p4d_replicas(struct page *base_page, struct mm_struct *mm,
 }
 
 int alloc_pgd_replicas(struct page *base_page, struct mm_struct *mm,
-                              nodemask_t nodes,
-                              struct page **pages, int *count)
+		       nodemask_t nodes, struct page **pages, int *count)
 {
 	int i;
 	int base_node;
@@ -250,75 +274,80 @@ int alloc_pgd_replicas(struct page *base_page, struct mm_struct *mm,
 			continue;
 
 		new_page = mitosis_alloc_replica_page(i, alloc_order);
+		if (!new_page)
+			return -ENOMEM;
 
 		new_page->pt_owner_mm = mm;
 		if (mm)
-		WRITE_ONCE(new_page->pt_replica, NULL);
+			WRITE_ONCE(new_page->pt_replica, NULL);
 		pages[(*count)++] = new_page;
 	}
 
 	return 0;
 }
 
-int free_replica_chain_safe(struct page *primary_page, const char *level_name, int order)
+int free_replica_chain_safe(struct page *primary_page,
+			    const char *level_name, int order)
 {
-    struct page *cur_page;
-    struct page *next_page;
-    struct page *start_page;
-    struct page *pages_to_free[NUMA_NODE_COUNT];
-    int free_count = 0;
-    int i;
+	struct page *cur_page;
+	struct page *next_page;
+	struct page *start_page;
+	struct page *pages_to_free[NUMA_NODE_COUNT];
+	int free_count = 0;
+	int i;
 
-    if (!primary_page)
-        return 0;
+	if (!primary_page)
+		return 0;
 
-    cur_page = xchg(&primary_page->pt_replica, NULL);
-    if (!cur_page)
-        return 0;
+	cur_page = xchg(&primary_page->pt_replica, NULL);
+	if (!cur_page)
+		return 0;
 
-    start_page = primary_page;
+	start_page = primary_page;
 
-    while (cur_page && cur_page != start_page && free_count < NUMA_NODE_COUNT) {
-        pages_to_free[free_count++] = cur_page;
-        next_page = READ_ONCE(cur_page->pt_replica);
-        WRITE_ONCE(cur_page->pt_replica, NULL);
-        cur_page = next_page;
-    }
+	while (cur_page && cur_page != start_page &&
+	       free_count < NUMA_NODE_COUNT) {
+		pages_to_free[free_count++] = cur_page;
+		next_page = READ_ONCE(cur_page->pt_replica);
+		WRITE_ONCE(cur_page->pt_replica, NULL);
+		cur_page = next_page;
+	}
 
-    smp_mb();
+	/* Ensure all replica pointer updates are visible before freeing */
+	smp_mb();
 
-    for (i = 0; i < free_count; i++) {
-        struct mm_struct *owner_mm = pages_to_free[i]->pt_owner_mm;
-        int nid = page_to_nid(pages_to_free[i]);
-        bool from_cache = PageMitosisFromCache(pages_to_free[i]);
+	for (i = 0; i < free_count; i++) {
+		struct mm_struct *owner_mm = pages_to_free[i]->pt_owner_mm;
+		int nid = page_to_nid(pages_to_free[i]);
+		bool from_cache = PageMitosisFromCache(pages_to_free[i]);
 
-        if (strcmp(level_name, "pte") == 0) {
-            pagetable_dtor(page_ptdesc(pages_to_free[i]));
-            if (owner_mm)
-                mm_dec_nr_ptes(owner_mm);
-        } else if (strcmp(level_name, "pmd") == 0) {
-            pagetable_dtor(page_ptdesc(pages_to_free[i]));
-            if (owner_mm)
-                mm_dec_nr_pmds(owner_mm);
-        } else if (strcmp(level_name, "pud") == 0) {
-            if (owner_mm)
-                mm_dec_nr_puds(owner_mm);
-        }
+		if (strcmp(level_name, "pte") == 0) {
+			pagetable_dtor(page_ptdesc(pages_to_free[i]));
+			if (owner_mm)
+				mm_dec_nr_ptes(owner_mm);
+		} else if (strcmp(level_name, "pmd") == 0) {
+			pagetable_dtor(page_ptdesc(pages_to_free[i]));
+			if (owner_mm)
+				mm_dec_nr_pmds(owner_mm);
+		} else if (strcmp(level_name, "pud") == 0) {
+			if (owner_mm)
+				mm_dec_nr_puds(owner_mm);
+		}
 
-        pages_to_free[i]->pt_owner_mm = NULL;
+		pages_to_free[i]->pt_owner_mm = NULL;
 
-        if (order == 0 && from_cache) {
-            ClearPageMitosisFromCache(pages_to_free[i]);
-            pages_to_free[i]->pt_replica = NULL;
-            if (mitosis_cache_push(pages_to_free[i], nid, 0))
-                continue;
-        }
+		if (order == 0 && from_cache) {
+			ClearPageMitosisFromCache(pages_to_free[i]);
+			pages_to_free[i]->pt_replica = NULL;
+			if (mitosis_cache_push(pages_to_free[i], nid, 0))
+				continue;
+		}
 
-        ClearPageMitosisFromCache(pages_to_free[i]);
-        __free_pages(pages_to_free[i], order);
-    }
+		ClearPageMitosisFromCache(pages_to_free[i]);
+		__free_pages(pages_to_free[i], order);
+	}
 
-    return free_count;
+	return free_count;
 }
 
 void pgtable_repl_alloc_pte(struct mm_struct *mm, unsigned long pfn)
@@ -334,6 +363,7 @@ void pgtable_repl_alloc_pte(struct mm_struct *mm, unsigned long pfn)
 
 	base_page = pfn_to_page(pfn);
 
+	/* Pairs with smp_store_release() in pgtable_repl_enable() */
 	if (!smp_load_acquire(&mm->repl_pgd_enabled))
 		return;
 
@@ -350,6 +380,7 @@ void pgtable_repl_alloc_pte(struct mm_struct *mm, unsigned long pfn)
 		clflush_cache_range(page_address(pages[i]), PAGE_SIZE);
 	}
 
+	/* Recheck: replication may have been disabled concurrently */
 	if (unlikely(!smp_load_acquire(&mm->repl_pgd_enabled))) {
 		for (i = 1; i < count; i++) {
 			pagetable_dtor(page_ptdesc(pages[i]));
@@ -370,6 +401,7 @@ void pgtable_repl_alloc_pte(struct mm_struct *mm, unsigned long pfn)
 		return;
 	}
 }
+EXPORT_SYMBOL(pgtable_repl_alloc_pte);
 
 void pgtable_repl_alloc_pmd(struct mm_struct *mm, unsigned long pfn)
 {
@@ -384,6 +416,7 @@ void pgtable_repl_alloc_pmd(struct mm_struct *mm, unsigned long pfn)
 
 	base_page = pfn_to_page(pfn);
 
+	/* Pairs with smp_store_release() in pgtable_repl_enable() */
 	if (!smp_load_acquire(&mm->repl_pgd_enabled))
 		return;
 
@@ -400,6 +433,7 @@ void pgtable_repl_alloc_pmd(struct mm_struct *mm, unsigned long pfn)
 		clflush_cache_range(page_address(pages[i]), PAGE_SIZE);
 	}
 
+	/* Recheck: replication may have been disabled concurrently */
 	if (unlikely(!smp_load_acquire(&mm->repl_pgd_enabled))) {
 		for (i = 1; i < count; i++) {
 			pagetable_dtor(page_ptdesc(pages[i]));
@@ -420,6 +454,7 @@ void pgtable_repl_alloc_pmd(struct mm_struct *mm, unsigned long pfn)
 		return;
 	}
 }
+EXPORT_SYMBOL(pgtable_repl_alloc_pmd);
 
 void pgtable_repl_alloc_pud(struct mm_struct *mm, unsigned long pfn)
 {
@@ -434,6 +469,7 @@ void pgtable_repl_alloc_pud(struct mm_struct *mm, unsigned long pfn)
 
 	base_page = pfn_to_page(pfn);
 
+	/* Pairs with smp_store_release() in pgtable_repl_enable() */
 	if (!smp_load_acquire(&mm->repl_pgd_enabled))
 		return;
 
@@ -450,6 +486,7 @@ void pgtable_repl_alloc_pud(struct mm_struct *mm, unsigned long pfn)
 		clflush_cache_range(page_address(pages[i]), PAGE_SIZE);
 	}
 
+	/* Recheck: replication may have been disabled concurrently */
 	if (unlikely(!smp_load_acquire(&mm->repl_pgd_enabled))) {
 		for (i = 1; i < count; i++) {
 			mm_dec_nr_puds(mm);
@@ -468,6 +505,7 @@ void pgtable_repl_alloc_pud(struct mm_struct *mm, unsigned long pfn)
 		return;
 	}
 }
+EXPORT_SYMBOL(pgtable_repl_alloc_pud);
 
 void pgtable_repl_alloc_p4d(struct mm_struct *mm, unsigned long pfn)
 {
@@ -482,6 +520,7 @@ void pgtable_repl_alloc_p4d(struct mm_struct *mm, unsigned long pfn)
 
 	base_page = pfn_to_page(pfn);
 
+	/* Pairs with smp_store_release() in pgtable_repl_enable() */
 	if (!smp_load_acquire(&mm->repl_pgd_enabled))
 		return;
 
@@ -498,6 +537,7 @@ void pgtable_repl_alloc_p4d(struct mm_struct *mm, unsigned long pfn)
 		clflush_cache_range(page_address(pages[i]), PAGE_SIZE);
 	}
 
+	/* Recheck: replication may have been disabled concurrently */
 	if (unlikely(!smp_load_acquire(&mm->repl_pgd_enabled))) {
 		for (i = 1; i < count; i++) {
 			pages[i]->pt_owner_mm = NULL;
@@ -514,6 +554,7 @@ void pgtable_repl_alloc_p4d(struct mm_struct *mm, unsigned long pfn)
 		return;
 	}
 }
+EXPORT_SYMBOL(pgtable_repl_alloc_p4d);
 
 void pgtable_repl_release_pte(struct mm_struct *mm, unsigned long pfn)
 {
@@ -534,7 +575,8 @@ void pgtable_repl_release_pte(struct mm_struct *mm, unsigned long pfn)
 
 	start_page = page;
 
-	while (cur_page && cur_page != start_page && free_count < NUMA_NODE_COUNT) {
+	while (cur_page && cur_page != start_page &&
+	       free_count < NUMA_NODE_COUNT) {
 		pages_to_free[free_count++] = cur_page;
 		next_page = READ_ONCE(cur_page->pt_replica);
 		WRITE_ONCE(cur_page->pt_replica, NULL);
@@ -545,7 +587,6 @@ void pgtable_repl_release_pte(struct mm_struct *mm, unsigned long pfn)
 		struct mm_struct *owner_mm = pages_to_free[i]->pt_owner_mm;
 		int nid = page_to_nid(pages_to_free[i]);
 		bool from_cache = PageMitosisFromCache(pages_to_free[i]);
-
 
 		pagetable_dtor(page_ptdesc(pages_to_free[i]));
 		if (owner_mm)
@@ -563,6 +604,7 @@ void pgtable_repl_release_pte(struct mm_struct *mm, unsigned long pfn)
 		__free_page(pages_to_free[i]);
 	}
 }
+EXPORT_SYMBOL(pgtable_repl_release_pte);
 
 void pgtable_repl_release_pmd(struct mm_struct *mm, unsigned long pfn)
 {
@@ -583,7 +625,8 @@ void pgtable_repl_release_pmd(struct mm_struct *mm, unsigned long pfn)
 
 	start_page = page;
 
-	while (cur_page && cur_page != start_page && free_count < NUMA_NODE_COUNT) {
+	while (cur_page && cur_page != start_page &&
+	       free_count < NUMA_NODE_COUNT) {
 		pages_to_free[free_count++] = cur_page;
 		next_page = READ_ONCE(cur_page->pt_replica);
 		WRITE_ONCE(cur_page->pt_replica, NULL);
@@ -594,7 +637,6 @@ void pgtable_repl_release_pmd(struct mm_struct *mm, unsigned long pfn)
 		struct mm_struct *owner_mm = pages_to_free[i]->pt_owner_mm;
 		int nid = page_to_nid(pages_to_free[i]);
 		bool from_cache = PageMitosisFromCache(pages_to_free[i]);
-
 
 		pagetable_dtor(page_ptdesc(pages_to_free[i]));
 		if (owner_mm)
@@ -612,6 +654,7 @@ void pgtable_repl_release_pmd(struct mm_struct *mm, unsigned long pfn)
 		__free_page(pages_to_free[i]);
 	}
 }
+EXPORT_SYMBOL(pgtable_repl_release_pmd);
 
 void pgtable_repl_release_pud(struct mm_struct *mm, unsigned long pfn)
 {
@@ -632,7 +675,8 @@ void pgtable_repl_release_pud(struct mm_struct *mm, unsigned long pfn)
 
 	start_page = page;
 
-	while (cur_page && cur_page != start_page && free_count < NUMA_NODE_COUNT) {
+	while (cur_page && cur_page != start_page &&
+	       free_count < NUMA_NODE_COUNT) {
 		pages_to_free[free_count++] = cur_page;
 		next_page = READ_ONCE(cur_page->pt_replica);
 		WRITE_ONCE(cur_page->pt_replica, NULL);
@@ -643,7 +687,6 @@ void pgtable_repl_release_pud(struct mm_struct *mm, unsigned long pfn)
 		struct mm_struct *owner_mm = pages_to_free[i]->pt_owner_mm;
 		int nid = page_to_nid(pages_to_free[i]);
 		bool from_cache = PageMitosisFromCache(pages_to_free[i]);
-
 
 		if (owner_mm)
 			mm_dec_nr_puds(owner_mm);
@@ -660,6 +703,7 @@ void pgtable_repl_release_pud(struct mm_struct *mm, unsigned long pfn)
 		__free_page(pages_to_free[i]);
 	}
 }
+EXPORT_SYMBOL(pgtable_repl_release_pud);
 
 void pgtable_repl_release_p4d(struct mm_struct *mm, unsigned long pfn)
 {
@@ -680,7 +724,8 @@ void pgtable_repl_release_p4d(struct mm_struct *mm, unsigned long pfn)
 
 	start_page = page;
 
-	while (cur_page && cur_page != start_page && free_count < NUMA_NODE_COUNT) {
+	while (cur_page && cur_page != start_page &&
+	       free_count < NUMA_NODE_COUNT) {
 		pages_to_free[free_count++] = cur_page;
 		next_page = READ_ONCE(cur_page->pt_replica);
 		WRITE_ONCE(cur_page->pt_replica, NULL);
@@ -690,7 +735,6 @@ void pgtable_repl_release_p4d(struct mm_struct *mm, unsigned long pfn)
 	for (i = 0; i < free_count; i++) {
 		int nid = page_to_nid(pages_to_free[i]);
 		bool from_cache = PageMitosisFromCache(pages_to_free[i]);
-
 
 		pages_to_free[i]->pt_owner_mm = NULL;
 
@@ -705,12 +749,4 @@ void pgtable_repl_release_p4d(struct mm_struct *mm, unsigned long pfn)
 		__free_page(pages_to_free[i]);
 	}
 }
-
-EXPORT_SYMBOL(pgtable_repl_alloc_pte);
-EXPORT_SYMBOL(pgtable_repl_alloc_pmd);
-EXPORT_SYMBOL(pgtable_repl_alloc_pud);
-EXPORT_SYMBOL(pgtable_repl_alloc_p4d);
-EXPORT_SYMBOL(pgtable_repl_release_pte);
-EXPORT_SYMBOL(pgtable_repl_release_pmd);
-EXPORT_SYMBOL(pgtable_repl_release_pud);
 EXPORT_SYMBOL(pgtable_repl_release_p4d);

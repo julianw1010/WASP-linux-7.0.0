@@ -1259,8 +1259,8 @@ static inline pte_t ptep_get_and_clear(struct mm_struct *mm, unsigned long addr,
 
 #define __HAVE_ARCH_PTEP_GET_AND_CLEAR_FULL
 static inline pte_t ptep_get_and_clear_full(struct mm_struct *mm,
-                                            unsigned long addr, pte_t *ptep,
-                                            int full)
+					    unsigned long addr, pte_t *ptep,
+					    int full)
 {
 	pte_t pte;
 	pte = pgtable_repl_ptep_get_and_clear(mm, ptep);
@@ -1298,7 +1298,7 @@ extern int pmdp_clear_flush_young(struct vm_area_struct *vma,
 
 #define __HAVE_ARCH_PMDP_HUGE_GET_AND_CLEAR
 static inline pmd_t pmdp_huge_get_and_clear(struct mm_struct *mm, unsigned long addr,
-                                            pmd_t *pmdp)
+					    pmd_t *pmdp)
 {
 	pmd_t pmd = pgtable_repl_pmdp_huge_get_and_clear(mm, pmdp);
 	page_table_check_pmd_clear(mm, addr, pmd);
