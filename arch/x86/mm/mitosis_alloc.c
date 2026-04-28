@@ -76,11 +76,11 @@ int alloc_pte_replicas(struct page *base_page, struct mm_struct *mm,
 
 		new_page = mitosis_alloc_replica_page(i, 0);
 		if (!new_page)
-			return -ENOMEM;
+			goto fail;
 
 		if (WARN_ON_ONCE(!pagetable_pte_ctor(mm, page_ptdesc(new_page)))) {
 			__free_page(new_page);
-			return -ENOMEM;
+			goto fail;
 		}
 
 		new_page->pt_owner_mm = mm;
@@ -90,6 +90,16 @@ int alloc_pte_replicas(struct page *base_page, struct mm_struct *mm,
 	}
 
 	return 0;
+
+fail:
+	for (i = 1; i < *count; i++) {
+		pagetable_dtor(page_ptdesc(pages[i]));
+		mm_dec_nr_ptes(mm);
+		pages[i]->pt_owner_mm = NULL;
+		__free_page(pages[i]);
+	}
+	*count = 0;
+	return -ENOMEM;
 }
 
 int alloc_pmd_replicas(struct page *base_page, struct mm_struct *mm,
@@ -130,11 +140,11 @@ int alloc_pmd_replicas(struct page *base_page, struct mm_struct *mm,
 
 		new_page = mitosis_alloc_replica_page(i, 0);
 		if (!new_page)
-			return -ENOMEM;
+			goto fail;
 
 		if (WARN_ON_ONCE(!pagetable_pmd_ctor(mm, page_ptdesc(new_page)))) {
 			__free_page(new_page);
-			return -ENOMEM;
+			goto fail;
 		}
 
 		new_page->pt_owner_mm = mm;
@@ -144,6 +154,16 @@ int alloc_pmd_replicas(struct page *base_page, struct mm_struct *mm,
 	}
 
 	return 0;
+
+fail:
+	for (i = 1; i < *count; i++) {
+		pagetable_dtor(page_ptdesc(pages[i]));
+		mm_dec_nr_pmds(mm);
+		pages[i]->pt_owner_mm = NULL;
+		__free_page(pages[i]);
+	}
+	*count = 0;
+	return -ENOMEM;
 }
 
 int alloc_pud_replicas(struct page *base_page, struct mm_struct *mm,
@@ -184,7 +204,7 @@ int alloc_pud_replicas(struct page *base_page, struct mm_struct *mm,
 
 		new_page = mitosis_alloc_replica_page(i, 0);
 		if (!new_page)
-			return -ENOMEM;
+			goto fail;
 
 		new_page->pt_owner_mm = mm;
 		mm_inc_nr_puds(mm);
@@ -193,6 +213,15 @@ int alloc_pud_replicas(struct page *base_page, struct mm_struct *mm,
 	}
 
 	return 0;
+
+fail:
+	for (i = 1; i < *count; i++) {
+		mm_dec_nr_puds(mm);
+		pages[i]->pt_owner_mm = NULL;
+		__free_page(pages[i]);
+	}
+	*count = 0;
+	return -ENOMEM;
 }
 
 int alloc_p4d_replicas(struct page *base_page, struct mm_struct *mm,
@@ -233,7 +262,7 @@ int alloc_p4d_replicas(struct page *base_page, struct mm_struct *mm,
 
 		new_page = mitosis_alloc_replica_page(i, 0);
 		if (!new_page)
-			return -ENOMEM;
+			goto fail;
 
 		new_page->pt_owner_mm = mm;
 		WRITE_ONCE(new_page->pt_replica, NULL);
@@ -241,6 +270,14 @@ int alloc_p4d_replicas(struct page *base_page, struct mm_struct *mm,
 	}
 
 	return 0;
+
+fail:
+	for (i = 1; i < *count; i++) {
+		pages[i]->pt_owner_mm = NULL;
+		__free_page(pages[i]);
+	}
+	*count = 0;
+	return -ENOMEM;
 }
 
 int alloc_pgd_replicas(struct page *base_page, struct mm_struct *mm,
@@ -275,7 +312,7 @@ int alloc_pgd_replicas(struct page *base_page, struct mm_struct *mm,
 
 		new_page = mitosis_alloc_replica_page(i, alloc_order);
 		if (!new_page)
-			return -ENOMEM;
+			goto fail;
 
 		new_page->pt_owner_mm = mm;
 		if (mm)
@@ -284,6 +321,14 @@ int alloc_pgd_replicas(struct page *base_page, struct mm_struct *mm,
 	}
 
 	return 0;
+
+fail:
+	for (i = 1; i < *count; i++) {
+		pages[i]->pt_owner_mm = NULL;
+		__free_pages(pages[i], alloc_order);
+	}
+	*count = 0;
+	return -ENOMEM;
 }
 
 int free_replica_chain_safe(struct page *primary_page,

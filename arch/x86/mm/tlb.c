@@ -826,6 +826,7 @@ static pgd_t *mitosis_select_replica(struct mm_struct *mm, int local_node)
 	return node_pgd;
 }
 
+
 /*
  * Attempt to switch CR3 to the selected replica. Returns true if the
  * switch was performed or the CR3 already points to the replica.
