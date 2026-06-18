@@ -52,6 +52,10 @@ void ___pmd_free_tlb(struct mmu_gather *tlb, pmd_t *pmd)
     bool from_cache = PageMitosisFromCache(page);
 
     paravirt_release_pmd(tlb->mm, __pa(pmd) >> PAGE_SHIFT);
+    /*
+     * NOTE! For PAE, any changes to the top page-directory-pointer-table
+     * entries need a full cr3 reload to flush.
+     */
 #ifdef CONFIG_X86_PAE
     tlb->need_flush_all = 1;
 #endif
@@ -285,9 +289,12 @@ static int preallocate_pmds(struct mm_struct *mm, pmd_t *pmds[], int count)
 static void mop_up_one_pmd(struct mm_struct *mm, pgd_t *pgdp)
 {
 	pgd_t pgd = *pgdp;
+
 	if (pgd_val(pgd) != 0) {
 		pmd_t *pmd = (pmd_t *)pgd_page_vaddr(pgd);
+
 		pgd_clear(pgdp);
+
 		paravirt_release_pmd(mm, pgd_val(pgd) >> PAGE_SHIFT);
 		pmd_free(mm, pmd);
 		mm_dec_nr_pmds(mm);
@@ -368,6 +375,12 @@ static void pgd_prepopulate_user_pmd(struct mm_struct *mm,
 
 static inline pgd_t *_pgd_alloc(struct mm_struct *mm)
 {
+	/*
+	 * PTI and Xen need a whole page for the PAE PGD
+	 * even though the hardware only needs 32 bytes.
+	 *
+	 * For simplicity, allocate a page for all users.
+	 */
 	int order = pgd_allocation_order();
 	struct page *page;
 	pgd_t *pgd;

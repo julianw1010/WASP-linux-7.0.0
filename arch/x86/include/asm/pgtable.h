@@ -1272,6 +1272,11 @@ static inline pte_t ptep_get_and_clear_full(struct mm_struct *mm,
 static inline void ptep_set_wrprotect(struct mm_struct *mm,
 				      unsigned long addr, pte_t *ptep)
 {
+	/*
+	 * Avoid accidentally creating shadow stack PTEs
+	 * (Write=0,Dirty=1).  Use cmpxchg() to prevent races with
+	 * the hardware setting Dirty=1.
+	 */
 	pgtable_repl_ptep_set_wrprotect(mm, addr, ptep);
 }
 
@@ -1301,7 +1306,9 @@ static inline pmd_t pmdp_huge_get_and_clear(struct mm_struct *mm, unsigned long 
                                             pmd_t *pmdp)
 {
 	pmd_t pmd = pgtable_repl_pmdp_huge_get_and_clear(mm, pmdp);
+
 	page_table_check_pmd_clear(mm, addr, pmd);
+
 	return pmd;
 }
 
@@ -1320,6 +1327,11 @@ static inline pud_t pudp_huge_get_and_clear(struct mm_struct *mm,
 static inline void pmdp_set_wrprotect(struct mm_struct *mm,
 				      unsigned long addr, pmd_t *pmdp)
 {
+	/*
+	 * Avoid accidentally creating shadow stack PTEs
+	 * (Write=0,Dirty=1).  Use cmpxchg() to prevent races with
+	 * the hardware setting Dirty=1.
+	 */
 	pgtable_repl_pmdp_set_wrprotect(mm, addr, pmdp);
 }
 

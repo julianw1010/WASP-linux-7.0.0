@@ -2111,11 +2111,13 @@ vm_fault_t do_huge_pmd_wp_page(struct vm_fault *vmf)
 		}
 		folio_put(folio);
 	}
+
 	/* Recheck after temporarily dropping the PT lock. */
 	if (PageAnonExclusive(page)) {
 		folio_unlock(folio);
 		goto reuse;
 	}
+
 	/*
 	 * See do_wp_page(): we can only reuse the folio exclusively if
 	 * there are no additional references. Note that we always drain
@@ -2144,6 +2146,7 @@ reuse:
 		spin_unlock(vmf->ptl);
 		return 0;
 	}
+
 unlock_fallback:
 	folio_unlock(folio);
 	spin_unlock(vmf->ptl);
@@ -2204,6 +2207,10 @@ vm_fault_t do_huge_pmd_numa_page(struct vm_fault *vmf)
 
 	pmd = pmd_modify(old_pmd, vma->vm_page_prot);
 
+	/*
+	 * Detect now whether the PMD could be writable; this information
+	 * is only valid while holding the PT lock.
+	 */
 	writable = pmd_write(pmd);
 	if (!writable && vma_wants_manual_pte_write_upgrade(vma) &&
 	    can_change_pmd_writable(vma, vmf->address, pmd))
@@ -2223,6 +2230,7 @@ vm_fault_t do_huge_pmd_numa_page(struct vm_fault *vmf)
 		flags |= TNF_MIGRATE_FAIL;
 		goto out_map;
 	}
+	/* The folio is isolated and isolation code holds a folio reference. */
 	spin_unlock(vmf->ptl);
 	writable = false;
 
@@ -2240,6 +2248,7 @@ vm_fault_t do_huge_pmd_numa_page(struct vm_fault *vmf)
 		return 0;
 	}
 out_map:
+	/* Restore the PMD */
 	pmd = pmd_modify(pgtable_repl_get_pmd(vmf->pmd), vma->vm_page_prot);
 	pmd = pmd_mkyoung(pmd);
 	if (writable)
@@ -2305,16 +2314,20 @@ bool madvise_free_huge_pmd(struct mmu_gather *tlb, struct vm_area_struct *vma,
 		folio_put(folio);
 		goto out_unlocked;
 	}
+
 	if (folio_test_dirty(folio))
 		folio_clear_dirty(folio);
 	folio_unlock(folio);
+
 	if (pmd_young(orig_pmd) || pmd_dirty(orig_pmd)) {
 		pmdp_invalidate(vma, addr, pmd);
 		orig_pmd = pmd_mkold(orig_pmd);
 		orig_pmd = pmd_mkclean(orig_pmd);
+
 		set_pmd_at(mm, addr, pmd, orig_pmd);
 		tlb_remove_pmd_tlb_entry(tlb, pmd, addr);
 	}
+
 	folio_mark_lazyfree(folio);
 	ret = true;
 out:
@@ -3300,8 +3313,6 @@ void __split_huge_pmd(struct vm_area_struct *vma, pmd_t *pmd,
 				(address & HPAGE_PMD_MASK) + HPAGE_PMD_SIZE);
 	mmu_notifier_invalidate_range_start(&range);
 	ptl = pmd_lock(vma->vm_mm, pmd);
-	
-	
 	split_huge_pmd_locked(vma, range.start, pmd, freeze);
 	spin_unlock(ptl);
 	mmu_notifier_invalidate_range_end(&range);
@@ -4939,12 +4950,14 @@ void remove_migration_pmd(struct page_vma_mapped_walk *pvmw, struct page *new)
 	pmd_t pmde;
 	pmd_t pmdval;
 	softleaf_t entry;
+
 	if (!(pvmw->pmd && !pvmw->pte))
 		return;
 	pmdval = pgtable_repl_get_pmd(pvmw->pmd);
 	entry = softleaf_from_pmd(pmdval);
 	folio_get(folio);
 	pmde = folio_mk_pmd(folio, READ_ONCE(vma->vm_page_prot));
+
 	if (pmd_swp_soft_dirty(pmdval))
 		pmde = pmd_mksoft_dirty(pmde);
 	if (softleaf_is_migration_write(entry))
@@ -4953,10 +4966,13 @@ void remove_migration_pmd(struct page_vma_mapped_walk *pvmw, struct page *new)
 		pmde = pmd_mkuffd_wp(pmde);
 	if (!softleaf_is_migration_young(entry))
 		pmde = pmd_mkold(pmde);
+	/* NOTE: this may contain setting soft-dirty on some archs */
 	if (folio_test_dirty(folio) && softleaf_is_migration_dirty(entry))
 		pmde = pmd_mkdirty(pmde);
+
 	if (folio_is_device_private(folio)) {
 		swp_entry_t entry;
+
 		if (pmd_write(pmde))
 			entry = make_writable_device_private_entry(
 							page_to_pfn(new));
@@ -4964,21 +4980,27 @@ void remove_migration_pmd(struct page_vma_mapped_walk *pvmw, struct page *new)
 			entry = make_readable_device_private_entry(
 							page_to_pfn(new));
 		pmde = swp_entry_to_pmd(entry);
+
 		if (pmd_swp_soft_dirty(pmdval))
 			pmde = pmd_swp_mksoft_dirty(pmde);
 		if (pmd_swp_uffd_wp(pmdval))
 			pmde = pmd_swp_mkuffd_wp(pmde);
 	}
+
 	if (folio_test_anon(folio)) {
 		rmap_t rmap_flags = RMAP_NONE;
+
 		if (!softleaf_is_migration_read(entry))
 			rmap_flags |= RMAP_EXCLUSIVE;
+
 		folio_add_anon_rmap_pmd(folio, new, vma, haddr, rmap_flags);
 	} else {
 		folio_add_file_rmap_pmd(folio, new, vma);
 	}
 	VM_BUG_ON(pmd_write(pmde) && folio_test_anon(folio) && !PageAnonExclusive(new));
 	set_pmd_at(mm, haddr, pvmw->pmd, pmde);
+
+	/* No need to invalidate - it was non-present before */
 	update_mmu_cache_pmd(vma, address, pvmw->pmd);
 	trace_remove_migration_pmd(address, pmd_val(pmde));
 }

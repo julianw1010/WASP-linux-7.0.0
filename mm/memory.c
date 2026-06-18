@@ -6375,6 +6375,7 @@ static vm_fault_t __handle_mm_fault(struct vm_area_struct *vma,
 	p4d = p4d_alloc(mm, pgd, address);
 	if (!p4d)
 		return VM_FAULT_OOM;
+
 	vmf.pud = pud_alloc(mm, p4d, address);
 	if (!vmf.pud)
 		return VM_FAULT_OOM;

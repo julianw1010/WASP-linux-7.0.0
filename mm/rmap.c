@@ -1102,6 +1102,7 @@ static int page_vma_mkclean_one(struct page_vma_mapped_walk *pvmw)
 	struct vm_area_struct *vma = pvmw->vma;
 	struct mmu_notifier_range range;
 	unsigned long address = pvmw->address;
+
 	/*
 	 * We have to assume the worse case ie pmd for invalidation. Note that
 	 * the folio can not be freed from this function.
@@ -1166,7 +1167,9 @@ static int page_vma_mkclean_one(struct page_vma_mapped_walk *pvmw)
 		if (ret)
 			cleaned++;
 	}
+
 	mmu_notifier_invalidate_range_end(&range);
+
 	return cleaned;
 }
 
