@@ -16,10 +16,7 @@ static inline struct page *mitosis_alloc_primary(struct mm_struct *mm,
 	int node;
 	struct page *page;
 
-	if (sysctl_mitosis_mode == 0)
-		node = 0;
-	else
-		node = numa_node_id();
+	node = numa_node_id();
 
 	if (order == 0) {
 		page = mitosis_cache_pop(node, cache_level);
@@ -27,8 +24,6 @@ static inline struct page *mitosis_alloc_primary(struct mm_struct *mm,
 			return page;
 	}
 
-	if (sysctl_mitosis_mode == 0)
-		return alloc_pages_node(node, gfp | __GFP_THISNODE, order);
 	return alloc_pages(gfp, order);
 }
 
@@ -47,8 +42,7 @@ static inline bool mitosis_active(struct mm_struct *mm)
 {
 	return mm && mm != &init_mm &&
 	       (smp_load_acquire(&mm->repl_pgd_enabled) ||
-		READ_ONCE(mm->cache_only_mode) ||
-		sysctl_mitosis_mode == 0);
+		READ_ONCE(mm->cache_only_mode));
 }
 
 /**

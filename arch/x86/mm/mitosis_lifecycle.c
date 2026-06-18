@@ -745,17 +745,15 @@ int mitosis_sysctl_handler(struct ctl_table *table, int write,
 		return ret;
 
 	if (write) {
-		if (new_val > 1)
+		if (new_val > 0)
 			new_val = 1;
-		else if (new_val < -1)
+		else
 			new_val = -1;
 
 		sysctl_mitosis_mode = new_val;
 
 		if (new_val == 1)
 			pr_info("Mitosis: mode=1 (replication auto-enabled for new processes)\n");
-		else if (new_val == 0)
-			pr_info("Mitosis: mode=0 (all page table allocations forced to node 0)\n");
 		else
 			pr_info("Mitosis: mode=-1 (default allocation, no special handling)\n");
 	}

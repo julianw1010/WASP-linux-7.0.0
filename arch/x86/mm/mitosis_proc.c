@@ -215,9 +215,9 @@ static ssize_t mitosis_mode_write(struct file *file, const char __user *ubuf,
 	if (kstrtol(buf, 10, &val))
 		return -EINVAL;
 
-	if (val > 1)
+	if (val > 0)
 		val = 1;
-	else if (val < -1)
+	else
 		val = -1;
 
 	sysctl_mitosis_mode = val;
