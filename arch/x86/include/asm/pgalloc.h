@@ -83,7 +83,6 @@ static inline void pmd_populate_no_rep(struct mm_struct *mm, pmd_t *pmd,
 	native_set_pmd(pmd, __pmd(((pteval_t)pfn << PAGE_SHIFT) | _PAGE_TABLE));
 }
 
-
 static inline void pmd_populate(struct mm_struct *mm, pmd_t *pmd,
 				struct page *pte)
 {

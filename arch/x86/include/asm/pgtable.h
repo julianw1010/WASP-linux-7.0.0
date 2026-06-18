@@ -1303,7 +1303,7 @@ extern int pmdp_clear_flush_young(struct vm_area_struct *vma,
 
 #define __HAVE_ARCH_PMDP_HUGE_GET_AND_CLEAR
 static inline pmd_t pmdp_huge_get_and_clear(struct mm_struct *mm, unsigned long addr,
-                                            pmd_t *pmdp)
+				       pmd_t *pmdp)
 {
 	pmd_t pmd = pgtable_repl_pmdp_huge_get_and_clear(mm, pmdp);
 

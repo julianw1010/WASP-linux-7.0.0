@@ -12,7 +12,6 @@ struct page *mitosis_alloc_replica_page(int node, int order)
     struct page *page;
     int dummy_level = 0;
 
-
     if (order == 0) {
         page = mitosis_cache_pop(node, dummy_level);
         if (page) {
