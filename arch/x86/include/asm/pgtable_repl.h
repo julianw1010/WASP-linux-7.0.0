@@ -180,8 +180,6 @@ static inline pgd_t *mitosis_get_user_pgd_entry(pgd_t *kernel_pgdp)
     return (pgd_t *)((unsigned long)kernel_pgd_base + PAGE_SIZE + offset);
 }
 
-int mitosis_interleave_node(struct mm_struct *mm);
-
 struct page *get_replica_for_node(struct page *base, int target_node);
 bool link_page_replicas(struct page **pages, int count);
 struct page *mitosis_alloc_replica_page(int node, int order);

@@ -2,7 +2,6 @@
 #include <linux/cpumask.h>
 #include <linux/smp.h>
 #include <linux/sched.h>
-#include <linux/mempolicy.h>
 #include <asm/tlbflush.h>
 #include <asm/pgtable_repl.h>
 
@@ -102,33 +101,3 @@ void pgtable_repl_force_steering_switch(struct mm_struct *mm, nodemask_t *change
     free_cpumask_var(target_cpus);
 }
 EXPORT_SYMBOL(pgtable_repl_force_steering_switch);
-
-int mitosis_interleave_node(struct mm_struct *mm)
-{
-	struct mempolicy *pol;
-	int idx, node, i, num_nodes;
-
-	if (!mm)
-		return -1;
-
-	pol = current->mempolicy;
-	if (!pol || pol->mode != MPOL_INTERLEAVE)
-		return -1;
-
-	num_nodes = nodes_weight(pol->nodes);
-	if (num_nodes <= 1)
-		return -1;
-
-	idx = atomic_inc_return(&mm->pgtable_interleave_counter) - 1;
-	idx = idx % num_nodes;
-
-	i = 0;
-	for_each_node_mask(node, pol->nodes) {
-		if (i == idx)
-			return node;
-		i++;
-	}
-
-	return -1;
-}
-EXPORT_SYMBOL(mitosis_interleave_node);

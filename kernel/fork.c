@@ -1125,7 +1125,6 @@ static struct mm_struct *mm_init(struct mm_struct *mm, struct task_struct *p,
 	spin_lock_init(&mm->repl_alloc_lock);
 	spin_lock_init(&mm->mitosis_deferred_lock);
 	mm->mitosis_deferred_pages = NULL;
-	atomic_set(&mm->pgtable_interleave_counter, 0);
 
 	memset(mm->pgd_replicas, 0, sizeof(mm->pgd_replicas));
 	mm->original_pgd = NULL;

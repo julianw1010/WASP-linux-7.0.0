@@ -13,17 +13,13 @@ static inline struct page *mitosis_alloc_primary(struct mm_struct *mm,
 						  gfp_t gfp, int order,
 						  int cache_level)
 {
-	int interleave;
 	int node;
 	struct page *page;
 
-	if (sysctl_mitosis_mode == 0) {
+	if (sysctl_mitosis_mode == 0)
 		node = 0;
-		interleave = -1;
-	} else {
-		interleave = mitosis_interleave_node(mm);
-		node = (interleave >= 0) ? interleave : numa_node_id();
-	}
+	else
+		node = numa_node_id();
 
 	if (order == 0) {
 		page = mitosis_cache_pop(node, cache_level);
@@ -31,7 +27,7 @@ static inline struct page *mitosis_alloc_primary(struct mm_struct *mm,
 			return page;
 	}
 
-	if (sysctl_mitosis_mode == 0 || interleave >= 0)
+	if (sysctl_mitosis_mode == 0)
 		return alloc_pages_node(node, gfp | __GFP_THISNODE, order);
 	return alloc_pages(gfp, order);
 }
