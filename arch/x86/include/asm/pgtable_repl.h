@@ -64,7 +64,6 @@ int mitosis_cache_drain_all(void);
 
 extern int sysctl_mitosis_inherit;
 
-void pgtable_repl_cr3_intercept(unsigned long cr3);
 int pgtable_repl_enable(struct mm_struct *mm, nodemask_t nodes);
 void pgtable_repl_disable(struct mm_struct *mm);
 void pgtable_repl_set_pgd(pgd_t *pgd, pgd_t pgdval);
@@ -73,7 +72,6 @@ void pgtable_repl_set_pud(pud_t *pud, pud_t pudval);
 void pgtable_repl_set_pmd(pmd_t *pmd, pmd_t pmdval);
 void pgtable_repl_set_pte(pte_t *pte, pte_t pteval);
 pte_t pgtable_repl_get_pte(pte_t *ptep);
-bool mitosis_should_auto_enable(void);
 
 void pgtable_repl_force_steering_switch(struct mm_struct *mm, nodemask_t *changed_nodes);
 
@@ -126,30 +124,6 @@ static inline pgd_t *mitosis_kernel_to_user_pgd(pgd_t *kernel_pgd)
 }
 #endif
 
-#ifdef CONFIG_MITIGATION_PAGE_TABLE_ISOLATION
-static inline pgd_t *mitosis_user_to_kernel_pgd(pgd_t *user_pgd)
-{
-    return (pgd_t *)((unsigned long)user_pgd - PAGE_SIZE);
-}
-#else
-static inline pgd_t *mitosis_user_to_kernel_pgd(pgd_t *user_pgd)
-{
-    return NULL;
-}
-#endif
-
-#ifdef CONFIG_MITIGATION_PAGE_TABLE_ISOLATION
-static inline bool mitosis_is_user_pgd(pgd_t *pgd)
-{
-    return ((unsigned long)pgd & PAGE_SIZE) != 0;
-}
-#else
-static inline bool mitosis_is_user_pgd(pgd_t *pgd)
-{
-    return false;
-}
-#endif
-
 static inline int mitosis_pgd_alloc_order(void)
 {
     return mitosis_pti_active() ? 1 : 0;
@@ -190,8 +164,7 @@ int alloc_p4d_replicas(struct page *base_page, struct mm_struct *mm,
                        struct page **pages, int *count);
 int alloc_pgd_replicas(struct page *base_page, struct mm_struct *mm,
                        nodemask_t nodes, struct page **pages, int *count);
-int free_replica_chain_safe(struct page *primary_page,
-                            const char *level_name, int order);
+int mitosis_free_replica_chain(struct page *primary, int level, int order);
 
 extern int sysctl_mitosis_verify_enabled;
 void mitosis_verify_fault_walk(struct mm_struct *mm, unsigned long address);

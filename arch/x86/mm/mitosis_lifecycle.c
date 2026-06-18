@@ -427,7 +427,7 @@ int pgtable_repl_enable(struct mm_struct *mm, nodemask_t nodes)
     mm->original_pgd = base_pgd;
 
     if (READ_ONCE(base_page->pt_replica))
-        free_replica_chain_safe(base_page, "pgd", mitosis_pgd_alloc_order());
+        mitosis_free_replica_chain(base_page, MITOSIS_CACHE_PGD, mitosis_pgd_alloc_order());
 
     WRITE_ONCE(base_page->pt_replica, NULL);
 
@@ -557,7 +557,7 @@ static void free_all_replicas_via_chains(struct mm_struct *mm)
         if (pgtable_l5_enabled()) {
             child_phys = pgd_val(pgdval) & PTE_PFN_MASK;
             if (child_phys)
-                free_replica_chain_safe(pfn_to_page(child_phys >> PAGE_SHIFT), "p4d", 0);
+                mitosis_free_replica_chain(pfn_to_page(child_phys >> PAGE_SHIFT), MITOSIS_CACHE_P4D, 0);
         }
 
         p4d_base = p4d_offset(&pgd[pgd_idx], 0);
@@ -572,7 +572,7 @@ static void free_all_replicas_via_chains(struct mm_struct *mm)
 
             child_phys = p4d_val(p4dval) & PTE_PFN_MASK;
             if (child_phys)
-                free_replica_chain_safe(pfn_to_page(child_phys >> PAGE_SHIFT), "pud", 0);
+                mitosis_free_replica_chain(pfn_to_page(child_phys >> PAGE_SHIFT), MITOSIS_CACHE_PUD, 0);
 
             pud_base = pud_offset(&p4d_base[p4d_idx], 0);
 
@@ -586,7 +586,7 @@ static void free_all_replicas_via_chains(struct mm_struct *mm)
 
                 child_phys = pud_val(pudval) & PTE_PFN_MASK;
                 if (child_phys)
-                    free_replica_chain_safe(pfn_to_page(child_phys >> PAGE_SHIFT), "pmd", 0);
+                    mitosis_free_replica_chain(pfn_to_page(child_phys >> PAGE_SHIFT), MITOSIS_CACHE_PMD, 0);
 
                 pmd_base = pmd_offset(&pud_base[pud_idx], 0);
 
@@ -599,7 +599,7 @@ static void free_all_replicas_via_chains(struct mm_struct *mm)
 
                     child_phys = pmd_val(pmdval) & PTE_PFN_MASK;
                     if (child_phys)
-                        free_replica_chain_safe(pfn_to_page(child_phys >> PAGE_SHIFT), "pte", 0);
+                        mitosis_free_replica_chain(pfn_to_page(child_phys >> PAGE_SHIFT), MITOSIS_CACHE_PTE, 0);
                 }
             }
         }

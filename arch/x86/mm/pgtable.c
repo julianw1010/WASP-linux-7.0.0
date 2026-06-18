@@ -24,23 +24,20 @@ pgtable_t pte_alloc_one(struct mm_struct *mm)
 void ___pte_free_tlb(struct mmu_gather *tlb, struct page *pte)
 {
 	struct ptdesc *ptdesc = page_ptdesc(pte);
-	int nid = page_to_nid(pte);
 	bool from_cache = PageMitosisFromCache(pte);
 
 	paravirt_release_pte(tlb->mm, page_to_pfn(pte));
-	pte->pt_owner_mm = NULL;
 
-	if (from_cache) {
-		ClearPageMitosisFromCache(pte);
-		pte->pt_replica = NULL;
+	if (from_cache)
 		pagetable_dtor(ptdesc);
-		if (mitosis_cache_push(pte, nid, MITOSIS_CACHE_PTE))
-			return;
-		pagetable_free(ptdesc);
+
+	if (mitosis_free_or_cache(pte, MITOSIS_CACHE_PTE))
 		return;
-	}
-	ClearPageMitosisFromCache(pte);
-	tlb_remove_ptdesc(tlb, ptdesc);
+
+	if (from_cache)
+		pagetable_free(ptdesc);
+	else
+		tlb_remove_ptdesc(tlb, ptdesc);
 }
 
 #if CONFIG_PGTABLE_LEVELS > 2
@@ -48,7 +45,6 @@ void ___pmd_free_tlb(struct mmu_gather *tlb, pmd_t *pmd)
 {
 	struct ptdesc *ptdesc = virt_to_ptdesc(pmd);
 	struct page *page = ptdesc_page(ptdesc);
-	int nid = page_to_nid(page);
 	bool from_cache = PageMitosisFromCache(page);
 
 	paravirt_release_pmd(tlb->mm, __pa(pmd) >> PAGE_SHIFT);
@@ -59,19 +55,16 @@ void ___pmd_free_tlb(struct mmu_gather *tlb, pmd_t *pmd)
 #ifdef CONFIG_X86_PAE
 	tlb->need_flush_all = 1;
 #endif
-	page->pt_owner_mm = NULL;
-
-	if (from_cache) {
-		ClearPageMitosisFromCache(page);
-		page->pt_replica = NULL;
+	if (from_cache)
 		pagetable_dtor(ptdesc);
-		if (mitosis_cache_push(page, nid, MITOSIS_CACHE_PMD))
-			return;
-		pagetable_free(ptdesc);
+
+	if (mitosis_free_or_cache(page, MITOSIS_CACHE_PMD))
 		return;
-	}
-	ClearPageMitosisFromCache(page);
-	tlb_remove_ptdesc(tlb, ptdesc);
+
+	if (from_cache)
+		pagetable_free(ptdesc);
+	else
+		tlb_remove_ptdesc(tlb, ptdesc);
 }
 
 #if CONFIG_PGTABLE_LEVELS > 3
@@ -79,23 +72,20 @@ void ___pud_free_tlb(struct mmu_gather *tlb, pud_t *pud)
 {
 	struct ptdesc *ptdesc = virt_to_ptdesc(pud);
 	struct page *page = ptdesc_page(ptdesc);
-	int nid = page_to_nid(page);
 	bool from_cache = PageMitosisFromCache(page);
 
 	paravirt_release_pud(tlb->mm, __pa(pud) >> PAGE_SHIFT);
-	page->pt_owner_mm = NULL;
 
-	if (from_cache) {
-		ClearPageMitosisFromCache(page);
-		page->pt_replica = NULL;
+	if (from_cache)
 		pagetable_dtor(ptdesc);
-		if (mitosis_cache_push(page, nid, MITOSIS_CACHE_PUD))
-			return;
-		pagetable_free(ptdesc);
+
+	if (mitosis_free_or_cache(page, MITOSIS_CACHE_PUD))
 		return;
-	}
-	ClearPageMitosisFromCache(page);
-	tlb_remove_ptdesc(tlb, ptdesc);
+
+	if (from_cache)
+		pagetable_free(ptdesc);
+	else
+		tlb_remove_ptdesc(tlb, ptdesc);
 }
 
 #if CONFIG_PGTABLE_LEVELS > 4
@@ -103,23 +93,20 @@ void ___p4d_free_tlb(struct mmu_gather *tlb, p4d_t *p4d)
 {
 	struct ptdesc *ptdesc = virt_to_ptdesc(p4d);
 	struct page *page = ptdesc_page(ptdesc);
-	int nid = page_to_nid(page);
 	bool from_cache = PageMitosisFromCache(page);
 
 	paravirt_release_p4d(tlb->mm, __pa(p4d) >> PAGE_SHIFT);
-	page->pt_owner_mm = NULL;
 
-	if (from_cache) {
-		ClearPageMitosisFromCache(page);
-		page->pt_replica = NULL;
+	if (from_cache)
 		pagetable_dtor(ptdesc);
-		if (mitosis_cache_push(page, nid, MITOSIS_CACHE_P4D))
-			return;
-		pagetable_free(ptdesc);
+
+	if (mitosis_free_or_cache(page, MITOSIS_CACHE_P4D))
 		return;
-	}
-	ClearPageMitosisFromCache(page);
-	tlb_remove_ptdesc(tlb, ptdesc);
+
+	if (from_cache)
+		pagetable_free(ptdesc);
+	else
+		tlb_remove_ptdesc(tlb, ptdesc);
 }
 #endif	/* CONFIG_PGTABLE_LEVELS > 4 */
 #endif	/* CONFIG_PGTABLE_LEVELS > 3 */
@@ -406,18 +393,15 @@ static inline void _pgd_free(struct mm_struct *mm, pgd_t *pgd)
 {
 	struct page *page = virt_to_page(pgd);
 	int order = pgd_allocation_order();
-	int nid = page_to_nid(page);
-	bool from_cache = PageMitosisFromCache(page);
 
-	page->pt_owner_mm = NULL;
-
-	if (order == 0 && from_cache) {
-		ClearPageMitosisFromCache(page);
-		page->pt_replica = NULL;
-		if (mitosis_cache_push(page, nid, MITOSIS_CACHE_PGD))
+	if (order == 0) {
+		if (mitosis_free_or_cache(page, MITOSIS_CACHE_PGD))
 			return;
+	} else {
+		page->pt_owner_mm = NULL;
+		ClearPageMitosisFromCache(page);
 	}
-	ClearPageMitosisFromCache(page);
+
 	__pgd_free(mm, pgd);
 }
 
