@@ -18,7 +18,6 @@
 #include <linux/sched/mm.h>
 #include <linux/mempolicy.h>
 
-int sysctl_mitosis_mode = -1;
 int sysctl_mitosis_inherit = 1;
 
 static DEFINE_MUTEX(global_repl_mutex);
@@ -720,47 +719,6 @@ void pgtable_repl_disable(struct mm_struct *mm)
     synchronize_rcu();
 }
 
-static int __init mitosis_setup(char *str)
-{
-	sysctl_mitosis_mode = 1;
-	return 1;
-}
-__setup("mitosis", mitosis_setup);
-
-int mitosis_sysctl_handler(struct ctl_table *table, int write,
-			   void *buffer, size_t *lenp, loff_t *ppos)
-{
-	int ret;
-	int new_val;
-	struct ctl_table tmp_table = {
-		.data = &new_val,
-		.maxlen = sizeof(int),
-		.mode = table->mode,
-	};
-
-	new_val = sysctl_mitosis_mode;
-
-	ret = proc_dointvec(&tmp_table, write, buffer, lenp, ppos);
-	if (ret < 0)
-		return ret;
-
-	if (write) {
-		if (new_val > 0)
-			new_val = 1;
-		else
-			new_val = -1;
-
-		sysctl_mitosis_mode = new_val;
-
-		if (new_val == 1)
-			pr_info("Mitosis: mode=1 (replication auto-enabled for new processes)\n");
-		else
-			pr_info("Mitosis: mode=-1 (default allocation, no special handling)\n");
-	}
-
-	return 0;
-}
-
 int mitosis_inherit_sysctl_handler(struct ctl_table *table, int write,
 				   void *buffer, size_t *lenp, loff_t *ppos)
 {
@@ -891,6 +849,5 @@ early_initcall(mitosis_check_numa_node_count);
 
 EXPORT_SYMBOL(pgtable_repl_enable);
 EXPORT_SYMBOL(pgtable_repl_disable);
-EXPORT_SYMBOL(mitosis_sysctl_handler);
 EXPORT_SYMBOL(mitosis_inherit_sysctl_handler);
 EXPORT_SYMBOL(pgtable_repl_enable_external);

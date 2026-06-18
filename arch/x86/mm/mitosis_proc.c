@@ -189,52 +189,6 @@ static const struct proc_ops mitosis_inherit_ops = {
 	.proc_release	= single_release,
 };
 
-static int mitosis_mode_show(struct seq_file *m, void *v)
-{
-	seq_printf(m, "%d\n", sysctl_mitosis_mode);
-	return 0;
-}
-
-static int mitosis_mode_open(struct inode *inode, struct file *file)
-{
-	return single_open(file, mitosis_mode_show, NULL);
-}
-
-static ssize_t mitosis_mode_write(struct file *file, const char __user *ubuf,
-				  size_t count, loff_t *ppos)
-{
-	char buf[32];
-	size_t len;
-	long val;
-
-	len = min(count, sizeof(buf) - 1);
-	if (copy_from_user(buf, ubuf, len))
-		return -EFAULT;
-	buf[len] = '\0';
-
-	if (kstrtol(buf, 10, &val))
-		return -EINVAL;
-
-	if (val > 0)
-		val = 1;
-	else
-		val = -1;
-
-	sysctl_mitosis_mode = val;
-
-	pr_info("MITOSIS: mode=%d\n", sysctl_mitosis_mode);
-
-	return count;
-}
-
-static const struct proc_ops mitosis_mode_ops = {
-	.proc_open	= mitosis_mode_open,
-	.proc_read	= seq_read,
-	.proc_write	= mitosis_mode_write,
-	.proc_lseek	= seq_lseek,
-	.proc_release	= single_release,
-};
-
 static int __init mitosis_proc_init(void)
 {
 	mitosis_dir = proc_mkdir("mitosis", NULL);
@@ -249,9 +203,6 @@ static int __init mitosis_proc_init(void)
 		
 	if (!proc_create("inherit", 0644, mitosis_dir, &mitosis_inherit_ops))
     		goto fail;
-
-	if (!proc_create("mode", 0644, mitosis_dir, &mitosis_mode_ops))
-		goto fail;
 
 	return 0;
 

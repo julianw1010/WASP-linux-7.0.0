@@ -62,7 +62,6 @@ int mitosis_cache_drain_all(void);
 #include <asm/pti.h>
 #endif
 
-extern int sysctl_mitosis_mode;
 extern int sysctl_mitosis_inherit;
 
 void pgtable_repl_cr3_intercept(unsigned long cr3);
@@ -89,9 +88,6 @@ void pgtable_repl_release_pmd(struct mm_struct *mm, unsigned long pfn);
 void pgtable_repl_release_pud(struct mm_struct *mm, unsigned long pfn);
 void pgtable_repl_release_p4d(struct mm_struct *mm, unsigned long pfn);
 
-
-int mitosis_sysctl_handler(struct ctl_table *table, int write,
-			 void *buffer, size_t *lenp, loff_t *ppos);
 int mitosis_inherit_sysctl_handler(struct ctl_table *table, int write,
 				   void *buffer, size_t *lenp, loff_t *ppos);
 

@@ -1633,10 +1633,6 @@ static int copy_mm(u64 clone_flags, struct task_struct *tsk)
 
 		if (sysctl_mitosis_inherit == 1 && parent_had_mitosis) {
 			pgtable_repl_enable(mm, saved_nodes);
-		} else if (sysctl_mitosis_mode == 1 &&
-			   !(tsk->flags & PF_KTHREAD) &&
-			   num_online_nodes() >= 2) {
-			pgtable_repl_enable(mm, node_online_map);
 		}
 	}
 

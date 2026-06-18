@@ -1466,10 +1466,6 @@ static struct linux_binprm *alloc_bprm(int fd, struct filename *filename, int fl
 		    !nodes_empty(current->mm->repl_pgd_nodes)) {
 			bprm->mm->repl_pending_enable = true;
 			bprm->mm->repl_pending_nodes = current->mm->repl_pgd_nodes;
-		} else if (sysctl_mitosis_mode == 1 &&
-			   num_online_nodes() >= 2) {
-			bprm->mm->repl_pending_enable = true;
-			bprm->mm->repl_pending_nodes = node_online_map;
 		}
 
 		return bprm;
