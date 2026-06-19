@@ -41,6 +41,9 @@ void pgtable_repl_set_pte(pte_t *ptep, pte_t pteval)
     }
 
     smp_wmb();
+
+    mitosis_verify_after_set_pte(ptep, pteval);
+
     return;
 
 native_only:
@@ -153,6 +156,9 @@ void pgtable_repl_set_pmd(pmd_t *pmdp, pmd_t pmdval)
     } while (cur_page && cur_page != start_page);
 
     smp_wmb();
+
+    mitosis_verify_after_set_pmd(pmdp, pmdval);
+
     return;
 
 native_only:
@@ -234,6 +240,9 @@ void pgtable_repl_set_pud(pud_t *pudp, pud_t pudval)
     has_child = pud_present(pudval) && !pud_trans_huge(pudval) && entry_val != 0;
 
     repl_set_upper_entry(pudp, entry_val, has_child, false);
+
+    mitosis_verify_after_set_pud(pudp, pudval);
+
     return;
 
 native_only:
@@ -273,6 +282,9 @@ void pgtable_repl_set_p4d(p4d_t *p4dp, p4d_t p4dval)
     has_child = p4d_present(p4dval) && entry_val != 0;
 
     repl_set_upper_entry(p4dp, entry_val, has_child, pti_mirror);
+
+    mitosis_verify_after_set_p4d(p4dp, p4dval);
+
     return;
 
 native_only:
@@ -312,6 +324,9 @@ void pgtable_repl_set_pgd(pgd_t *pgdp, pgd_t pgdval)
     has_child = pgd_present(pgdval) && entry_val != 0;
 
     repl_set_upper_entry(pgdp, entry_val, has_child, pti_mirror);
+
+    mitosis_verify_after_set_pgd(pgdp, pgdval);
+
     return;
 
 native_only:
@@ -353,7 +368,13 @@ pte_t pgtable_repl_get_pte(pte_t *ptep)
         cur_page = READ_ONCE(cur_page->pt_replica);
     }
 
-    return (pte_t){ .pte = val };
+    {
+        pte_t ret = (pte_t){ .pte = val };
+
+        mitosis_verify_get_pte(ptep, ret);
+
+        return ret;
+    }
 }
 
 pte_t pgtable_repl_ptep_get_and_clear(struct mm_struct *mm, pte_t *ptep)
@@ -390,6 +411,9 @@ pte_t pgtable_repl_ptep_get_and_clear(struct mm_struct *mm, pte_t *ptep)
     } while (cur_page && cur_page != start_page);
 
     smp_wmb();
+
+    mitosis_verify_after_ptep_get_and_clear(ptep);
+
     return __pte(val);
 }
 
@@ -433,6 +457,9 @@ void pgtable_repl_ptep_set_wrprotect(struct mm_struct *mm,
     } while (cur_page && cur_page != start_page);
 
     smp_wmb();
+
+    mitosis_verify_after_ptep_set_wrprotect(ptep);
+
     return;
 
 native_only:
@@ -482,6 +509,9 @@ int pgtable_repl_ptep_test_and_clear_young(struct vm_area_struct *vma,
     } while (cur_page && cur_page != start_page);
 
     smp_wmb();
+
+    mitosis_verify_after_ptep_clear_young(ptep);
+
     return young;
 
 native_only:
@@ -552,6 +582,9 @@ pmd_t pgtable_repl_pmdp_huge_get_and_clear(struct mm_struct *mm, pmd_t *pmdp)
     }
 
     smp_wmb();
+
+    mitosis_verify_after_pmdp_huge_get_and_clear(pmdp);
+
     return pmd_set_flags(__pmd(val), flags);
 }
 EXPORT_SYMBOL(pgtable_repl_pmdp_huge_get_and_clear);
@@ -605,6 +638,9 @@ void pgtable_repl_pmdp_set_wrprotect(struct mm_struct *mm,
     }
 
     smp_wmb();
+
+    mitosis_verify_after_pmdp_set_wrprotect(pmdp);
+
     return;
 
 native_only:
@@ -618,6 +654,8 @@ EXPORT_SYMBOL(pgtable_repl_pmdp_set_wrprotect);
 void pgtable_repl_free_pte_replicas(struct mm_struct *mm, struct page *page)
 {
     mitosis_free_replica_chain(page, MITOSIS_CACHE_PTE, 0);
+
+    mitosis_verify_after_free_replicas(page, MITOSIS_CACHE_PTE);
 }
 EXPORT_SYMBOL(pgtable_repl_free_pte_replicas);
 
@@ -702,6 +740,9 @@ pmd_t pgtable_repl_pmdp_establish(struct mm_struct *mm, pmd_t *pmdp, pmd_t pmd)
     }
 
     smp_wmb();
+
+    mitosis_verify_after_pmdp_establish(pmdp, pmd);
+
     return __pmd(val);
 
 native_only:
@@ -763,6 +804,9 @@ int pgtable_repl_pmdp_test_and_clear_young(struct vm_area_struct *vma,
     }
 
     smp_wmb();
+
+    mitosis_verify_after_pmdp_clear_young(pmdp);
+
     return ret;
 
 native_only:
@@ -815,7 +859,13 @@ pmd_t pgtable_repl_get_pmd(pmd_t *pmdp)
         cur_page = READ_ONCE(cur_page->pt_replica);
     }
 
-    return __pmd(val);
+    {
+        pmd_t ret = __pmd(val);
+
+        mitosis_verify_get_pmd(pmdp, ret);
+
+        return ret;
+    }
 }
 EXPORT_SYMBOL(pgtable_repl_get_pmd);
 

@@ -492,6 +492,9 @@ int pgtable_repl_enable(struct mm_struct *mm, nodemask_t nodes)
     mutex_unlock(&global_repl_mutex);
 
     pr_info("MITOSIS: Enabled page table replication for mm %px on %d nodes\n", mm, count);
+
+    mitosis_verify_after_enable(mm);
+
     return 0;
 
 fail_cleanup:
@@ -713,6 +716,8 @@ void pgtable_repl_disable(struct mm_struct *mm)
     mm->original_pgd = NULL;
 
     pr_info("MITOSIS: Disabled page table replication for mm %p\n", mm);
+
+    mitosis_verify_after_disable(mm);
 
     mutex_unlock(&mm->repl_mutex);
     mutex_unlock(&global_repl_mutex);

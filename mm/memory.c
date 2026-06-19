@@ -6651,6 +6651,9 @@ vm_fault_t handle_mm_fault(struct vm_area_struct *vma, unsigned long address,
 out:
 	mm_account_fault(mm, regs, address, flags, ret);
 
+	if (!(ret & VM_FAULT_ERROR))
+		mitosis_verify_fault_locality(mm, address);
+
 	return ret;
 }
 EXPORT_SYMBOL_GPL(handle_mm_fault);

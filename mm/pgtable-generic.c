@@ -176,6 +176,8 @@ void pgtable_trans_huge_deposit(struct mm_struct *mm, pmd_t *pmdp,
 	else
 		list_add(&pgtable->lru, &pmd_huge_pte(mm, pmdp)->lru);
 	pmd_huge_pte(mm, pmdp) = pgtable;
+
+	mitosis_verify_after_deposit(mm, pmdp, pgtable);
 }
 #endif
 
@@ -193,6 +195,9 @@ pgtable_t pgtable_trans_huge_withdraw(struct mm_struct *mm, pmd_t *pmdp)
 							  struct page, lru);
 	if (pmd_huge_pte(mm, pmdp))
 		list_del(&pgtable->lru);
+
+	mitosis_verify_after_withdraw(mm, pmdp, pgtable);
+
 	return pgtable;
 }
 #endif

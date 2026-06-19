@@ -168,4 +168,55 @@ int mitosis_free_replica_chain(struct page *primary, int level, int order);
 
 extern int sysctl_mitosis_verify_enabled;
 
+void mitosis_verify_after_set_pte(pte_t *ptep, pte_t pteval);
+
+void mitosis_verify_after_set_pmd(pmd_t *pmdp, pmd_t pmdval);
+
+void mitosis_verify_after_set_pud(pud_t *pudp, pud_t pudval);
+
+void mitosis_verify_after_set_p4d(p4d_t *p4dp, p4d_t p4dval);
+
+void mitosis_verify_after_set_pgd(pgd_t *pgdp, pgd_t pgdval);
+
+void mitosis_verify_after_thp_split(struct mm_struct *mm, pmd_t *pmdp);
+
+void mitosis_verify_after_ptep_get_and_clear(pte_t *ptep);
+
+void mitosis_verify_after_ptep_set_wrprotect(pte_t *ptep);
+
+void mitosis_verify_after_pmdp_set_wrprotect(pmd_t *pmdp);
+
+void mitosis_verify_after_pmdp_huge_get_and_clear(pmd_t *pmdp);
+
+void mitosis_verify_after_pmdp_establish(pmd_t *pmdp, pmd_t newpmd);
+
+void mitosis_verify_after_deposit(struct mm_struct *mm, pmd_t *pmdp,
+				  pgtable_t pgtable);
+
+void mitosis_verify_after_withdraw(struct mm_struct *mm, pmd_t *pmdp,
+				   pgtable_t pgtable);
+
+void mitosis_verify_get_pte(pte_t *ptep, pte_t result);
+
+void mitosis_verify_get_pmd(pmd_t *pmdp, pmd_t result);
+
+void mitosis_verify_after_ptep_clear_young(pte_t *ptep);
+
+void mitosis_verify_after_pmdp_clear_young(pmd_t *pmdp);
+
+void mitosis_verify_after_repl_alloc(struct mm_struct *mm, unsigned long pfn,
+				     int level);
+
+void mitosis_verify_after_thp_collapse(struct mm_struct *mm, pmd_t *pmdp);
+
+void mitosis_verify_after_enable(struct mm_struct *mm);
+
+void mitosis_verify_after_disable(struct mm_struct *mm);
+
+void mitosis_verify_after_cr3_switch(struct mm_struct *mm);
+
+void mitosis_verify_after_free_replicas(struct page *primary, int level);
+
+void mitosis_verify_fault_locality(struct mm_struct *mm, unsigned long address);
+
 #endif

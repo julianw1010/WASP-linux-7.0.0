@@ -258,6 +258,8 @@ static void pgtable_repl_alloc(struct mm_struct *mm, unsigned long pfn, int leve
 		}
 		return;
 	}
+
+	mitosis_verify_after_repl_alloc(mm, pfn, level);
 }
 
 void pgtable_repl_alloc_pte(struct mm_struct *mm, unsigned long pfn)
@@ -286,6 +288,8 @@ void pgtable_repl_release_pte(struct mm_struct *mm, unsigned long pfn)
 		return;
 
 	mitosis_free_replica_chain(pfn_to_page(pfn), MITOSIS_CACHE_PTE, 0);
+
+	mitosis_verify_after_free_replicas(pfn_to_page(pfn), MITOSIS_CACHE_PTE);
 }
 
 void pgtable_repl_release_pmd(struct mm_struct *mm, unsigned long pfn)
@@ -294,6 +298,8 @@ void pgtable_repl_release_pmd(struct mm_struct *mm, unsigned long pfn)
 		return;
 
 	mitosis_free_replica_chain(pfn_to_page(pfn), MITOSIS_CACHE_PMD, 0);
+
+	mitosis_verify_after_free_replicas(pfn_to_page(pfn), MITOSIS_CACHE_PMD);
 }
 
 void pgtable_repl_release_pud(struct mm_struct *mm, unsigned long pfn)
@@ -302,6 +308,8 @@ void pgtable_repl_release_pud(struct mm_struct *mm, unsigned long pfn)
 		return;
 
 	mitosis_free_replica_chain(pfn_to_page(pfn), MITOSIS_CACHE_PUD, 0);
+
+	mitosis_verify_after_free_replicas(pfn_to_page(pfn), MITOSIS_CACHE_PUD);
 }
 
 void pgtable_repl_release_p4d(struct mm_struct *mm, unsigned long pfn)
@@ -310,6 +318,8 @@ void pgtable_repl_release_p4d(struct mm_struct *mm, unsigned long pfn)
 		return;
 
 	mitosis_free_replica_chain(pfn_to_page(pfn), MITOSIS_CACHE_P4D, 0);
+
+	mitosis_verify_after_free_replicas(pfn_to_page(pfn), MITOSIS_CACHE_P4D);
 }
 
 EXPORT_SYMBOL(pgtable_repl_alloc_pte);
