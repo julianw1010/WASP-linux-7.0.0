@@ -105,48 +105,6 @@ static const struct proc_ops mitosis_cache_ops = {
 	.proc_release	= single_release,
 };
 
-static int mitosis_verify_show(struct seq_file *m, void *v)
-{
-	seq_printf(m, "%d\n", sysctl_mitosis_verify_enabled);
-	return 0;
-}
-
-static int mitosis_verify_open(struct inode *inode, struct file *file)
-{
-	return single_open(file, mitosis_verify_show, NULL);
-}
-
-static ssize_t mitosis_verify_write(struct file *file, const char __user *ubuf,
-				 size_t count, loff_t *ppos)
-{
-	char buf[32];
-	size_t len;
-	long val;
-
-	len = min(count, sizeof(buf) - 1);
-	if (copy_from_user(buf, ubuf, len))
-		return -EFAULT;
-	buf[len] = '\0';
-
-	if (kstrtol(buf, 10, &val))
-		return -EINVAL;
-
-	sysctl_mitosis_verify_enabled = (val != 0) ? 1 : 0;
-
-	pr_info("MITOSIS: fault verification %s\n",
-		sysctl_mitosis_verify_enabled ? "enabled" : "disabled");
-
-	return count;
-}
-
-static const struct proc_ops mitosis_verify_ops = {
-	.proc_open	= mitosis_verify_open,
-	.proc_read	= seq_read,
-	.proc_write	= mitosis_verify_write,
-	.proc_lseek	= seq_lseek,
-	.proc_release	= single_release,
-};
-
 static int mitosis_inherit_show(struct seq_file *m, void *v)
 {
 	seq_printf(m, "%d\n", sysctl_mitosis_inherit);
@@ -196,9 +154,6 @@ static int __init mitosis_proc_init(void)
 		return -ENOMEM;
 
 	if (!proc_create("cache", 0644, mitosis_dir, &mitosis_cache_ops))
-		goto fail;
-
-	if (!proc_create("verify", 0644, mitosis_dir, &mitosis_verify_ops))
 		goto fail;
 		
 	if (!proc_create("inherit", 0644, mitosis_dir, &mitosis_inherit_ops))

@@ -167,6 +167,5 @@ int alloc_pgd_replicas(struct page *base_page, struct mm_struct *mm,
 int mitosis_free_replica_chain(struct page *primary, int level, int order);
 
 extern int sysctl_mitosis_verify_enabled;
-void mitosis_verify_fault_walk(struct mm_struct *mm, unsigned long address);
 
 #endif

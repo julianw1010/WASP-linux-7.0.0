@@ -6625,10 +6625,6 @@ vm_fault_t handle_mm_fault(struct vm_area_struct *vma, unsigned long address,
 	else
 		ret = __handle_mm_fault(vma, address, flags);
 
-	if (smp_load_acquire(&vma->vm_mm->repl_pgd_enabled) &&
-		!(ret & (VM_FAULT_ERROR | VM_FAULT_RETRY)))
-		mitosis_verify_fault_walk(vma->vm_mm, address);
-
 	/*
 	 * Warning: It is no longer safe to dereference vma-> after this point,
 	 * because mmap_lock might have been dropped by __handle_mm_fault(), so
