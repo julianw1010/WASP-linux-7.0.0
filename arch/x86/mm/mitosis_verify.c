@@ -4,6 +4,858 @@
 int sysctl_mitosis_verify_enabled;
 EXPORT_SYMBOL(sysctl_mitosis_verify_enabled);
 
+void mitosis_verify_chain_integrity(struct page *primary, struct mm_struct *mm,
+				    int level)
+{
+	struct page *cur;
+	nodemask_t seen;
+	int count;
+	int pn;
+
+	if (!READ_ONCE(sysctl_mitosis_verify_enabled))
+		return;
+
+	if (!primary)
+		return;
+
+	cur = READ_ONCE(primary->pt_replica);
+	if (!cur)
+		return;
+
+	pn = page_to_nid(primary);
+	nodes_clear(seen);
+	node_set(pn, seen);
+	count = 1;
+
+	if (mm && smp_load_acquire(&mm->repl_pgd_enabled)) {
+		if (primary->pt_owner_mm != mm) {
+			pr_err("MITOSIS VERIFY chain: primary pt_owner_mm "
+			       "mismatch expected=%px got=%px level=%d "
+			       "pfn=0x%lx\n",
+			       mm, primary->pt_owner_mm, level,
+			       page_to_pfn(primary));
+			BUG();
+		}
+	}
+
+	while (cur != primary) {
+		int rn;
+
+		if (!cur) {
+			pr_err("MITOSIS VERIFY chain: broken (NULL) at "
+			       "count=%d level=%d pfn=0x%lx\n",
+			       count, level, page_to_pfn(primary));
+			BUG();
+		}
+
+		rn = page_to_nid(cur);
+
+		if (node_isset(rn, seen)) {
+			pr_err("MITOSIS VERIFY chain: duplicate node %d "
+			       "count=%d level=%d pfn=0x%lx\n",
+			       rn, count, level, page_to_pfn(primary));
+			BUG();
+		}
+		node_set(rn, seen);
+		count++;
+
+		if (count > NUMA_NODE_COUNT) {
+			pr_err("MITOSIS VERIFY chain: too long count=%d "
+			       "level=%d pfn=0x%lx\n",
+			       count, level, page_to_pfn(primary));
+			BUG();
+		}
+
+		if (mm && smp_load_acquire(&mm->repl_pgd_enabled)) {
+			if (!node_isset(rn, mm->repl_pgd_nodes)) {
+				pr_err("MITOSIS VERIFY chain: node %d not in "
+				       "repl_pgd_nodes level=%d pfn=0x%lx\n",
+				       rn, level, page_to_pfn(primary));
+				BUG();
+			}
+
+			if (cur->pt_owner_mm != mm) {
+				pr_err("MITOSIS VERIFY chain: pt_owner_mm "
+				       "mismatch on n%d expected=%px got=%px "
+				       "level=%d pfn=0x%lx\n",
+				       rn, mm, cur->pt_owner_mm, level,
+				       page_to_pfn(primary));
+				BUG();
+			}
+		}
+
+		cur = READ_ONCE(cur->pt_replica);
+	}
+
+	if (mm && smp_load_acquire(&mm->repl_pgd_enabled)) {
+		int expected = nodes_weight(mm->repl_pgd_nodes);
+
+		if (count != expected) {
+			pr_err("MITOSIS VERIFY chain: count mismatch "
+			       "got=%d expected=%d level=%d pfn=0x%lx\n",
+			       count, expected, level, page_to_pfn(primary));
+			BUG();
+		}
+
+		if (!nodes_subset(mm->repl_pgd_nodes, seen)) {
+			pr_err("MITOSIS VERIFY chain: missing nodes "
+			       "have=%*pbl want=%*pbl level=%d pfn=0x%lx\n",
+			       nodemask_pr_args(&seen),
+			       nodemask_pr_args(&mm->repl_pgd_nodes),
+			       level, page_to_pfn(primary));
+			BUG();
+		}
+	}
+}
+EXPORT_SYMBOL(mitosis_verify_chain_integrity);
+
+static void verify_page_full(struct page *primary_page,
+			     struct mm_struct *mm, int level)
+{
+	struct page *cur;
+	unsigned long *primary_entries;
+	int pn;
+	int num_entries;
+	int idx;
+
+	if (!primary_page || !READ_ONCE(primary_page->pt_replica))
+		return;
+
+	primary_entries = (unsigned long *)page_address(primary_page);
+	pn = page_to_nid(primary_page);
+	num_entries = PAGE_SIZE / sizeof(unsigned long);
+
+	if (level == MITOSIS_CACHE_PGD)
+		num_entries = KERNEL_PGD_BOUNDARY;
+
+	for (idx = 0; idx < num_entries; idx++) {
+		unsigned long pval = READ_ONCE(primary_entries[idx]);
+		bool p_present = !!(pval & _PAGE_PRESENT);
+		bool p_leaf;
+
+		if (!p_present && pval == 0)
+			continue;
+
+		if (level == MITOSIS_CACHE_PTE)
+			p_leaf = true;
+		else
+			p_leaf = p_present && (pval & _PAGE_PSE);
+
+		cur = READ_ONCE(primary_page->pt_replica);
+		while (cur && cur != primary_page) {
+			unsigned long *replica_entries =
+				(unsigned long *)page_address(cur);
+			unsigned long rval = READ_ONCE(replica_entries[idx]);
+			bool r_present = !!(rval & _PAGE_PRESENT);
+			int rn = page_to_nid(cur);
+
+			if (p_present && !r_present) {
+				pr_err("MITOSIS VERIFY tree: entry[%d] present "
+				       "on n%d but not on n%d level=%d\n",
+				       idx, pn, rn, level);
+				BUG();
+			}
+
+			if (!p_present && r_present) {
+				pr_err("MITOSIS VERIFY tree: entry[%d] absent "
+				       "on n%d but present on n%d level=%d\n",
+				       idx, pn, rn, level);
+				BUG();
+			}
+
+			if (!p_present) {
+				if (pval != rval) {
+					pr_err("MITOSIS VERIFY tree: non-present "
+					       "entry[%d] mismatch n%d=0x%lx "
+					       "n%d=0x%lx level=%d\n",
+					       idx, pn, pval, rn, rval, level);
+					BUG();
+				}
+				goto next_replica;
+			}
+
+			if (p_leaf) {
+				unsigned long p_pfn = pval & PTE_PFN_MASK;
+				unsigned long r_pfn = rval & PTE_PFN_MASK;
+
+				if (p_pfn != r_pfn) {
+					pr_err("MITOSIS VERIFY tree: leaf pfn "
+					       "mismatch entry[%d] n%d=0x%lx "
+					       "n%d=0x%lx level=%d\n",
+					       idx, pn, p_pfn >> PAGE_SHIFT,
+					       rn, r_pfn >> PAGE_SHIFT, level);
+					BUG();
+				}
+			} else {
+				unsigned long p_child_phys = pval & PTE_PFN_MASK;
+				unsigned long r_child_phys = rval & PTE_PFN_MASK;
+
+				if (r_child_phys &&
+				    pfn_valid(r_child_phys >> PAGE_SHIFT)) {
+					int cn = page_to_nid(pfn_to_page(
+						r_child_phys >> PAGE_SHIFT));
+
+					if (cn != rn) {
+						pr_err("MITOSIS VERIFY tree: "
+						       "locality entry[%d] "
+						       "replica n%d child on "
+						       "n%d level=%d\n",
+						       idx, rn, cn, level);
+						BUG();
+					}
+				}
+
+				if (p_child_phys &&
+				    pfn_valid(p_child_phys >> PAGE_SHIFT)) {
+					struct page *child_page = pfn_to_page(
+						p_child_phys >> PAGE_SHIFT);
+
+					if (READ_ONCE(child_page->pt_replica)) {
+						struct page *expected =
+							get_replica_for_node(
+								child_page, rn);
+
+						if (expected) {
+							unsigned long exp_phys =
+								__pa(page_address(
+									expected));
+
+							if (r_child_phys != exp_phys) {
+								pr_err("MITOSIS VERIFY "
+								       "tree: wrong child "
+								       "entry[%d] replica "
+								       "n%d got pfn 0x%lx "
+								       "expected pfn "
+								       "0x%lx level=%d\n",
+								       idx, rn,
+								       r_child_phys >> PAGE_SHIFT,
+								       exp_phys >> PAGE_SHIFT,
+								       level);
+								BUG();
+							}
+						}
+					} else {
+						if (r_child_phys != p_child_phys) {
+							pr_err("MITOSIS VERIFY "
+							       "tree: unreplicated "
+							       "child pfn mismatch "
+							       "entry[%d] n%d=0x%lx "
+							       "n%d=0x%lx level=%d\n",
+							       idx, pn,
+							       p_child_phys >> PAGE_SHIFT,
+							       rn,
+							       r_child_phys >> PAGE_SHIFT,
+							       level);
+							BUG();
+						}
+					}
+				}
+			}
+
+			if ((pval & _PAGE_RW) != (rval & _PAGE_RW)) {
+				pr_err("MITOSIS VERIFY tree: write flag "
+				       "mismatch entry[%d] n%d=%d n%d=%d "
+				       "level=%d\n",
+				       idx, pn, !!(pval & _PAGE_RW),
+				       rn, !!(rval & _PAGE_RW), level);
+				BUG();
+			}
+
+next_replica:
+			cur = READ_ONCE(cur->pt_replica);
+		}
+	}
+}
+
+void mitosis_verify_tree_consistency(struct mm_struct *mm)
+{
+	pgd_t *pgd;
+	struct page *pgd_page;
+	int gi, p4i, pui, pmi;
+	int node;
+	unsigned long cphys;
+
+	if (!READ_ONCE(sysctl_mitosis_verify_enabled))
+		return;
+
+	if (!mm || !smp_load_acquire(&mm->repl_pgd_enabled))
+		return;
+
+	if (smp_load_acquire(&mm->repl_in_progress))
+		return;
+
+	pgd = mm->pgd;
+	pgd_page = virt_to_page(pgd);
+
+	for_each_node_mask(node, mm->repl_pgd_nodes) {
+		pgd_t *node_pgd = mm->pgd_replicas[node];
+		struct page *expected;
+
+		if (!node_pgd) {
+			pr_err("MITOSIS VERIFY tree: pgd_replicas[%d] NULL\n",
+			       node);
+			BUG();
+		}
+
+		expected = get_replica_for_node(pgd_page, node);
+		if (!expected || page_address(expected) != node_pgd) {
+			pr_err("MITOSIS VERIFY tree: pgd_replicas[%d]=%px "
+			       "not in pt_replica chain (expected %px)\n",
+			       node, node_pgd,
+			       expected ? page_address(expected) : NULL);
+			BUG();
+		}
+
+		if (page_to_nid(virt_to_page(node_pgd)) != node) {
+			pr_err("MITOSIS VERIFY tree: pgd_replicas[%d] on "
+			       "wrong node %d\n",
+			       node, page_to_nid(virt_to_page(node_pgd)));
+			BUG();
+		}
+	}
+
+	if (READ_ONCE(pgd_page->pt_replica))
+		verify_page_full(pgd_page, mm, MITOSIS_CACHE_PGD);
+
+	for (gi = 0; gi < KERNEL_PGD_BOUNDARY; gi++) {
+		pgd_t gval = READ_ONCE(pgd[gi]);
+		p4d_t *p4d_base;
+
+		if (pgd_none(gval) || !pgd_present(gval))
+			continue;
+
+		if (pgtable_l5_enabled()) {
+			cphys = pgd_val(gval) & PTE_PFN_MASK;
+			if (cphys) {
+				struct page *p = pfn_to_page(cphys >> PAGE_SHIFT);
+
+				if (READ_ONCE(p->pt_replica))
+					verify_page_full(p, mm,
+							 MITOSIS_CACHE_P4D);
+			}
+		}
+
+		p4d_base = p4d_offset(&pgd[gi], 0);
+
+		for (p4i = 0; p4i < PTRS_PER_P4D; p4i++) {
+			p4d_t p4val = READ_ONCE(p4d_base[p4i]);
+			pud_t *pud_base;
+
+			if (p4d_none(p4val) || !p4d_present(p4val))
+				continue;
+
+			cphys = p4d_val(p4val) & PTE_PFN_MASK;
+			if (cphys) {
+				struct page *p = pfn_to_page(cphys >> PAGE_SHIFT);
+
+				if (READ_ONCE(p->pt_replica))
+					verify_page_full(p, mm,
+							 MITOSIS_CACHE_PUD);
+			}
+
+			pud_base = pud_offset(&p4d_base[p4i], 0);
+
+			for (pui = 0; pui < PTRS_PER_PUD; pui++) {
+				pud_t puval = READ_ONCE(pud_base[pui]);
+				pmd_t *pmd_base;
+
+				if (pud_none(puval) || !pud_present(puval) ||
+				    pud_trans_huge(puval))
+					continue;
+
+				cphys = pud_val(puval) & PTE_PFN_MASK;
+				if (cphys) {
+					struct page *p =
+						pfn_to_page(cphys >> PAGE_SHIFT);
+
+					if (READ_ONCE(p->pt_replica))
+						verify_page_full(p, mm,
+								 MITOSIS_CACHE_PMD);
+				}
+
+				pmd_base = pmd_offset(&pud_base[pui], 0);
+
+				for (pmi = 0; pmi < PTRS_PER_PMD; pmi++) {
+					pmd_t pmval = READ_ONCE(pmd_base[pmi]);
+
+					if (pmd_none(pmval) ||
+					    !pmd_present(pmval) ||
+					    pmd_trans_huge(pmval) ||
+					    pmd_leaf(pmval))
+						continue;
+
+					cphys = pmd_val(pmval) & PTE_PFN_MASK;
+					if (cphys) {
+						struct page *p = pfn_to_page(
+							cphys >> PAGE_SHIFT);
+
+						if (READ_ONCE(p->pt_replica))
+							verify_page_full(
+								p, mm,
+								MITOSIS_CACHE_PTE);
+					}
+				}
+			}
+		}
+	}
+}
+EXPORT_SYMBOL(mitosis_verify_tree_consistency);
+
+void mitosis_verify_after_fork(struct mm_struct *child, struct mm_struct *parent)
+{
+	struct page *child_pgd_page, *parent_pgd_page;
+	struct page *child_cur, *parent_cur;
+	pgd_t *pgd;
+	int node;
+	int gi, p4i, pui, pmi;
+	unsigned long cphys;
+
+	if (!READ_ONCE(sysctl_mitosis_verify_enabled))
+		return;
+
+	if (!child || !parent)
+		return;
+
+	if (!smp_load_acquire(&child->repl_pgd_enabled))
+		return;
+
+	if (child->pgd == parent->pgd) {
+		pr_err("MITOSIS VERIFY fork: child and parent share "
+		       "primary PGD %px\n", child->pgd);
+		BUG();
+	}
+
+	child_pgd_page = virt_to_page(child->pgd);
+	parent_pgd_page = virt_to_page(parent->pgd);
+
+	if (child_pgd_page == parent_pgd_page) {
+		pr_err("MITOSIS VERIFY fork: child and parent PGD "
+		       "same physical page pfn=0x%lx\n",
+		       page_to_pfn(child_pgd_page));
+		BUG();
+	}
+
+	if (smp_load_acquire(&parent->repl_pgd_enabled)) {
+		for_each_node_mask(node, child->repl_pgd_nodes) {
+			pgd_t *child_replica = child->pgd_replicas[node];
+			pgd_t *parent_replica = parent->pgd_replicas[node];
+
+			if (!child_replica || !parent_replica)
+				continue;
+
+			if (child_replica == parent_replica) {
+				pr_err("MITOSIS VERIFY fork: pgd_replicas[%d] "
+				       "shared between child and parent %px\n",
+				       node, child_replica);
+				BUG();
+			}
+		}
+
+		child_cur = child_pgd_page;
+		do {
+			parent_cur = parent_pgd_page;
+			do {
+				if (child_cur == parent_cur) {
+					pr_err("MITOSIS VERIFY fork: PGD chain "
+					       "page %px (n%d) shared between "
+					       "child and parent\n",
+					       child_cur,
+					       page_to_nid(child_cur));
+					BUG();
+				}
+				parent_cur = READ_ONCE(parent_cur->pt_replica);
+			} while (parent_cur && parent_cur != parent_pgd_page);
+
+			child_cur = READ_ONCE(child_cur->pt_replica);
+		} while (child_cur && child_cur != child_pgd_page);
+	}
+
+	pgd = child->pgd;
+
+	for (gi = 0; gi < KERNEL_PGD_BOUNDARY; gi++) {
+		pgd_t gval = READ_ONCE(pgd[gi]);
+		p4d_t *p4d_base;
+
+		if (pgd_none(gval) || !pgd_present(gval))
+			continue;
+
+		if (pgtable_l5_enabled()) {
+			cphys = pgd_val(gval) & PTE_PFN_MASK;
+			if (cphys && pfn_valid(cphys >> PAGE_SHIFT)) {
+				struct page *p = pfn_to_page(cphys >> PAGE_SHIFT);
+
+				if (p->pt_owner_mm == parent) {
+					pr_err("MITOSIS VERIFY fork: P4D at "
+					       "PGD[%d] owned by parent\n", gi);
+					BUG();
+				}
+			}
+		}
+
+		p4d_base = p4d_offset(&pgd[gi], 0);
+
+		for (p4i = 0; p4i < PTRS_PER_P4D; p4i++) {
+			p4d_t p4val = READ_ONCE(p4d_base[p4i]);
+			pud_t *pud_base;
+
+			if (p4d_none(p4val) || !p4d_present(p4val))
+				continue;
+
+			cphys = p4d_val(p4val) & PTE_PFN_MASK;
+			if (cphys && pfn_valid(cphys >> PAGE_SHIFT)) {
+				struct page *p = pfn_to_page(cphys >> PAGE_SHIFT);
+
+				if (p->pt_owner_mm == parent) {
+					pr_err("MITOSIS VERIFY fork: PUD at "
+					       "[%d][%d] owned by parent\n",
+					       gi, p4i);
+					BUG();
+				}
+			}
+
+			pud_base = pud_offset(&p4d_base[p4i], 0);
+
+			for (pui = 0; pui < PTRS_PER_PUD; pui++) {
+				pud_t puval = READ_ONCE(pud_base[pui]);
+				pmd_t *pmd_base;
+
+				if (pud_none(puval) || !pud_present(puval) ||
+				    pud_trans_huge(puval))
+					continue;
+
+				cphys = pud_val(puval) & PTE_PFN_MASK;
+				if (cphys && pfn_valid(cphys >> PAGE_SHIFT)) {
+					struct page *p =
+						pfn_to_page(cphys >> PAGE_SHIFT);
+
+					if (p->pt_owner_mm == parent) {
+						pr_err("MITOSIS VERIFY fork: "
+						       "PMD at [%d][%d][%d] "
+						       "owned by parent\n",
+						       gi, p4i, pui);
+						BUG();
+					}
+				}
+
+				pmd_base = pmd_offset(&pud_base[pui], 0);
+
+				for (pmi = 0; pmi < PTRS_PER_PMD; pmi++) {
+					pmd_t pmval = READ_ONCE(pmd_base[pmi]);
+
+					if (pmd_none(pmval) ||
+					    !pmd_present(pmval) ||
+					    pmd_trans_huge(pmval) ||
+					    pmd_leaf(pmval))
+						continue;
+
+					cphys = pmd_val(pmval) & PTE_PFN_MASK;
+					if (cphys &&
+					    pfn_valid(cphys >> PAGE_SHIFT)) {
+						struct page *p = pfn_to_page(
+							cphys >> PAGE_SHIFT);
+
+						if (p->pt_owner_mm == parent) {
+							pr_err("MITOSIS VERIFY "
+							       "fork: PTE at "
+							       "[%d][%d][%d][%d]"
+							       " owned by "
+							       "parent\n",
+							       gi, p4i, pui,
+							       pmi);
+							BUG();
+						}
+					}
+				}
+			}
+		}
+	}
+}
+EXPORT_SYMBOL(mitosis_verify_after_fork);
+
+void mitosis_verify_pti_consistency(struct mm_struct *mm)
+{
+	struct page *pgd_page, *cur;
+	int idx;
+
+	if (!READ_ONCE(sysctl_mitosis_verify_enabled))
+		return;
+
+	if (!mm || !smp_load_acquire(&mm->repl_pgd_enabled))
+		return;
+
+	if (!mitosis_pti_active())
+		return;
+
+	pgd_page = virt_to_page(mm->pgd);
+	cur = pgd_page;
+
+	do {
+		pgd_t *kernel_pgd = (pgd_t *)page_address(cur);
+		int rn = page_to_nid(cur);
+
+		for (idx = 0; idx < KERNEL_PGD_BOUNDARY; idx++) {
+			pgd_t *user_entryp =
+				mitosis_get_user_pgd_entry(&kernel_pgd[idx]);
+			pgd_t kval, uval;
+			unsigned long k_pfn, u_pfn;
+			bool k_present, u_present;
+
+			if (!user_entryp)
+				continue;
+
+			kval = READ_ONCE(kernel_pgd[idx]);
+			uval = READ_ONCE(*user_entryp);
+
+			k_present = pgd_present(kval) && !pgd_none(kval);
+			u_present = pgd_present(uval) && !pgd_none(uval);
+
+			if (u_present && !k_present) {
+				pr_err("MITOSIS VERIFY pti: user entry[%d] "
+				       "present but kernel absent on n%d\n",
+				       idx, rn);
+				BUG();
+			}
+
+			if (!k_present || !u_present)
+				continue;
+
+			k_pfn = pgd_val(kval) & PTE_PFN_MASK;
+			u_pfn = pgd_val(uval) & PTE_PFN_MASK;
+
+			if (k_pfn != u_pfn) {
+				pr_err("MITOSIS VERIFY pti: pfn mismatch "
+				       "entry[%d] kernel=0x%lx user=0x%lx "
+				       "on n%d\n",
+				       idx, k_pfn >> PAGE_SHIFT,
+				       u_pfn >> PAGE_SHIFT, rn);
+				BUG();
+			}
+
+			if (k_pfn && pfn_valid(k_pfn >> PAGE_SHIFT)) {
+				int cn = page_to_nid(
+					pfn_to_page(k_pfn >> PAGE_SHIFT));
+
+				if (cn != rn) {
+					pr_err("MITOSIS VERIFY pti: user "
+					       "entry[%d] on n%d points to "
+					       "child on n%d\n", idx, rn, cn);
+					BUG();
+				}
+			}
+		}
+
+		cur = READ_ONCE(cur->pt_replica);
+	} while (cur && cur != pgd_page);
+}
+EXPORT_SYMBOL(mitosis_verify_pti_consistency);
+
+void mitosis_verify_after_drain(struct mm_struct *mm)
+{
+	if (!READ_ONCE(sysctl_mitosis_verify_enabled))
+		return;
+
+	if (!mm)
+		return;
+
+	if (READ_ONCE(mm->mitosis_deferred_pages)) {
+		pr_err("MITOSIS VERIFY drain: deferred list not empty "
+		       "after drain mm=%px head=%px\n",
+		       mm, mm->mitosis_deferred_pages);
+		BUG();
+	}
+}
+EXPORT_SYMBOL(mitosis_verify_after_drain);
+
+void mitosis_verify_cache_pop(struct page *page, int node)
+{
+	unsigned long *entries;
+	int i;
+
+	if (!READ_ONCE(sysctl_mitosis_verify_enabled))
+		return;
+
+	if (!page)
+		return;
+
+	if (page_to_nid(page) != node) {
+		pr_err("MITOSIS VERIFY cache_pop: pfn=0x%lx on node %d "
+		       "but requested node %d\n",
+		       page_to_pfn(page), page_to_nid(page), node);
+		BUG();
+	}
+
+	if (page->pt_owner_mm) {
+		pr_err("MITOSIS VERIFY cache_pop: pfn=0x%lx still has "
+		       "pt_owner_mm=%px\n",
+		       page_to_pfn(page), page->pt_owner_mm);
+		BUG();
+	}
+
+	if (page->pt_replica) {
+		pr_err("MITOSIS VERIFY cache_pop: pfn=0x%lx still has "
+		       "pt_replica=%px\n",
+		       page_to_pfn(page), page->pt_replica);
+		BUG();
+	}
+
+	if (!PageMitosisFromCache(page)) {
+		pr_err("MITOSIS VERIFY cache_pop: pfn=0x%lx missing "
+		       "MitosisFromCache flag\n",
+		       page_to_pfn(page));
+		BUG();
+	}
+
+	entries = (unsigned long *)page_address(page);
+	for (i = 0; i < PAGE_SIZE / sizeof(unsigned long); i++) {
+		if (entries[i] != 0) {
+			pr_err("MITOSIS VERIFY cache_pop: pfn=0x%lx not "
+			       "zeroed at entry[%d] val=0x%lx node=%d\n",
+			       page_to_pfn(page), i, entries[i], node);
+			BUG();
+		}
+	}
+}
+EXPORT_SYMBOL(mitosis_verify_cache_pop);
+
+void mitosis_verify_after_pte_teardown(struct page *primary_pte)
+{
+	if (!READ_ONCE(sysctl_mitosis_verify_enabled))
+		return;
+
+	if (!primary_pte)
+		return;
+
+	if (!pfn_valid(page_to_pfn(primary_pte))) {
+		pr_err("MITOSIS VERIFY pte_teardown: invalid pfn=0x%lx\n",
+		       page_to_pfn(primary_pte));
+		BUG();
+	}
+
+	if (READ_ONCE(primary_pte->pt_replica)) {
+		pr_err("MITOSIS VERIFY pte_teardown: pfn=0x%lx still has "
+		       "pt_replica=%px after teardown\n",
+		       page_to_pfn(primary_pte),
+		       primary_pte->pt_replica);
+		BUG();
+	}
+}
+EXPORT_SYMBOL(mitosis_verify_after_pte_teardown);
+
+void mitosis_verify_mm_coherence(struct mm_struct *mm)
+{
+	int i;
+	int primary_node;
+
+	if (!READ_ONCE(sysctl_mitosis_verify_enabled))
+		return;
+
+	if (!mm)
+		return;
+
+	if (!smp_load_acquire(&mm->repl_pgd_enabled))
+		return;
+
+	if (smp_load_acquire(&mm->repl_in_progress))
+		return;
+
+	if (nodes_empty(mm->repl_pgd_nodes)) {
+		pr_err("MITOSIS VERIFY coherence: enabled but "
+		       "repl_pgd_nodes empty mm=%px\n", mm);
+		BUG();
+	}
+
+	if (nodes_weight(mm->repl_pgd_nodes) < 2) {
+		pr_err("MITOSIS VERIFY coherence: enabled but only "
+		       "%d nodes mm=%px\n",
+		       nodes_weight(mm->repl_pgd_nodes), mm);
+		BUG();
+	}
+
+	if (!mm->original_pgd) {
+		pr_err("MITOSIS VERIFY coherence: enabled but "
+		       "original_pgd NULL mm=%px\n", mm);
+		BUG();
+	}
+
+	if (mm->pgd != mm->original_pgd) {
+		pr_err("MITOSIS VERIFY coherence: pgd=%px diverged "
+		       "from original_pgd=%px mm=%px\n",
+		       mm->pgd, mm->original_pgd, mm);
+		BUG();
+	}
+
+	primary_node = page_to_nid(virt_to_page(mm->original_pgd));
+
+	if (!node_isset(primary_node, mm->repl_pgd_nodes)) {
+		pr_err("MITOSIS VERIFY coherence: primary node %d "
+		       "not in repl_pgd_nodes mm=%px\n",
+		       primary_node, mm);
+		BUG();
+	}
+
+	if (mm->pgd_replicas[primary_node] != mm->original_pgd) {
+		pr_err("MITOSIS VERIFY coherence: pgd_replicas[%d]=%px "
+		       "!= original_pgd=%px mm=%px\n",
+		       primary_node, mm->pgd_replicas[primary_node],
+		       mm->original_pgd, mm);
+		BUG();
+	}
+
+	for_each_node_mask(i, mm->repl_pgd_nodes) {
+		if (!mm->pgd_replicas[i]) {
+			pr_err("MITOSIS VERIFY coherence: pgd_replicas[%d] "
+			       "NULL but node in mask mm=%px\n", i, mm);
+			BUG();
+		}
+
+		if (page_to_nid(virt_to_page(mm->pgd_replicas[i])) != i) {
+			pr_err("MITOSIS VERIFY coherence: pgd_replicas[%d] "
+			       "on wrong node %d mm=%px\n",
+			       i, page_to_nid(virt_to_page(mm->pgd_replicas[i])),
+			       mm);
+			BUG();
+		}
+	}
+
+	for (i = 0; i < NUMA_NODE_COUNT; i++) {
+		if (!node_isset(i, mm->repl_pgd_nodes) &&
+		    mm->pgd_replicas[i]) {
+			pr_err("MITOSIS VERIFY coherence: pgd_replicas[%d] "
+			       "non-NULL but node not in mask mm=%px\n",
+			       i, mm);
+			BUG();
+		}
+	}
+
+	for (i = 0; i < NUMA_NODE_COUNT; i++) {
+		int target = READ_ONCE(mm->repl_steering[i]);
+
+		if (target == -1)
+			continue;
+
+		if (target < 0 || target >= NUMA_NODE_COUNT) {
+			pr_err("MITOSIS VERIFY coherence: steering[%d]=%d "
+			       "out of range mm=%px\n", i, target, mm);
+			BUG();
+		}
+
+		if (!node_isset(target, mm->repl_pgd_nodes)) {
+			pr_err("MITOSIS VERIFY coherence: steering[%d]=%d "
+			       "but node not in mask mm=%px\n",
+			       i, target, mm);
+			BUG();
+		}
+
+		if (!mm->pgd_replicas[target]) {
+			pr_err("MITOSIS VERIFY coherence: steering[%d]=%d "
+			       "but pgd_replicas[%d] NULL mm=%px\n",
+			       i, target, target, mm);
+			BUG();
+		}
+	}
+}
+EXPORT_SYMBOL(mitosis_verify_mm_coherence);
+
 void mitosis_verify_after_set_pte(pte_t *ptep, pte_t pteval)
 {
 	struct page *pte_page, *cur;
@@ -405,6 +1257,8 @@ void mitosis_verify_after_thp_split(struct mm_struct *mm, pmd_t *pmdp)
 
 		pmd_cur = READ_ONCE(pmd_cur->pt_replica);
 	}
+	mitosis_verify_chain_integrity(pmd_page, mm, MITOSIS_CACHE_PMD);
+	mitosis_verify_chain_integrity(primary_pte_page, mm, MITOSIS_CACHE_PTE);
 }
 EXPORT_SYMBOL(mitosis_verify_after_thp_split);
 
@@ -808,8 +1662,6 @@ void mitosis_verify_after_repl_alloc(struct mm_struct *mm, unsigned long pfn,
 				     int level)
 {
 	struct page *primary, *cur;
-	nodemask_t seen;
-	int count;
 	int pn;
 
 	if (!READ_ONCE(sysctl_mitosis_verify_enabled))
@@ -826,30 +1678,16 @@ void mitosis_verify_after_repl_alloc(struct mm_struct *mm, unsigned long pfn,
 	if (!cur)
 		return;
 
+	mitosis_verify_chain_integrity(primary, mm, level);
+
 	pn = page_to_nid(primary);
-	nodes_clear(seen);
-	node_set(pn, seen);
-	count = 1;
+	cur = READ_ONCE(primary->pt_replica);
 
 	while (cur != primary) {
 		unsigned long *src = (unsigned long *)page_address(primary);
 		unsigned long *dst = (unsigned long *)page_address(cur);
 		int rn = page_to_nid(cur);
 		int i;
-
-		if (node_isset(rn, seen)) {
-			pr_err("MITOSIS VERIFY repl_alloc: dup node %d "
-			       "level=%d pfn=0x%lx\n", rn, level, pfn);
-			BUG();
-		}
-		node_set(rn, seen);
-		count++;
-
-		if (count > NUMA_NODE_COUNT) {
-			pr_err("MITOSIS VERIFY repl_alloc: chain too long "
-			       "level=%d pfn=0x%lx\n", level, pfn);
-			BUG();
-		}
 
 		for (i = 0; i < PAGE_SIZE / sizeof(unsigned long); i++) {
 			unsigned long s = READ_ONCE(src[i]);
@@ -873,15 +1711,6 @@ void mitosis_verify_after_repl_alloc(struct mm_struct *mm, unsigned long pfn,
 			       "level=%d pfn=0x%lx\n", level, pfn);
 			BUG();
 		}
-	}
-
-	if (!nodes_subset(mm->repl_pgd_nodes, seen)) {
-		pr_err("MITOSIS VERIFY repl_alloc: missing nodes "
-		       "have=%*pbl want=%*pbl level=%d pfn=0x%lx\n",
-		       nodemask_pr_args(&seen),
-		       nodemask_pr_args(&mm->repl_pgd_nodes),
-		       level, pfn);
-		BUG();
 	}
 }
 EXPORT_SYMBOL(mitosis_verify_after_repl_alloc);
@@ -956,6 +1785,7 @@ void mitosis_verify_after_thp_collapse(struct mm_struct *mm, pmd_t *pmdp)
 		if (!cur)
 			break;
 	}
+	mitosis_verify_chain_integrity(pmd_page, mm, MITOSIS_CACHE_PMD);
 }
 EXPORT_SYMBOL(mitosis_verify_after_thp_collapse);
 
@@ -974,10 +1804,16 @@ static void verify_enable_walk_tree(struct mm_struct *mm, const char *caller)
 		if (pgtable_l5_enabled()) {
 			unsigned long cphys = pgd_val(gval) & PTE_PFN_MASK;
 
-			if (cphys && !READ_ONCE(pfn_to_page(cphys >> PAGE_SHIFT)->pt_replica)) {
-				pr_err("MITOSIS VERIFY enable: P4D at PGD[%d] "
-				       "has no replicas\n", gi);
-				BUG();
+			if (cphys) {
+				struct page *p = pfn_to_page(cphys >> PAGE_SHIFT);
+
+				if (!READ_ONCE(p->pt_replica)) {
+					pr_err("MITOSIS VERIFY enable: P4D at PGD[%d] "
+					       "has no replicas\n", gi);
+					BUG();
+				}
+				mitosis_verify_chain_integrity(p, mm,
+							       MITOSIS_CACHE_P4D);
 			}
 		}
 
@@ -992,10 +1828,16 @@ static void verify_enable_walk_tree(struct mm_struct *mm, const char *caller)
 				continue;
 
 			cphys = p4d_val(p4val) & PTE_PFN_MASK;
-			if (cphys && !READ_ONCE(pfn_to_page(cphys >> PAGE_SHIFT)->pt_replica)) {
-				pr_err("MITOSIS VERIFY enable: PUD at [%d][%d] "
-				       "has no replicas\n", gi, p4i);
-				BUG();
+			if (cphys) {
+				struct page *p = pfn_to_page(cphys >> PAGE_SHIFT);
+
+				if (!READ_ONCE(p->pt_replica)) {
+					pr_err("MITOSIS VERIFY enable: PUD at [%d][%d] "
+					       "has no replicas\n", gi, p4i);
+					BUG();
+				}
+				mitosis_verify_chain_integrity(p, mm,
+							       MITOSIS_CACHE_PUD);
 			}
 
 			pud_base = pud_offset(&p4d_base[p4i], 0);
@@ -1009,10 +1851,16 @@ static void verify_enable_walk_tree(struct mm_struct *mm, const char *caller)
 					continue;
 
 				cphys = pud_val(puval) & PTE_PFN_MASK;
-				if (cphys && !READ_ONCE(pfn_to_page(cphys >> PAGE_SHIFT)->pt_replica)) {
-					pr_err("MITOSIS VERIFY enable: PMD at [%d][%d][%d] "
-					       "has no replicas\n", gi, p4i, pui);
-					BUG();
+				if (cphys) {
+					struct page *p = pfn_to_page(cphys >> PAGE_SHIFT);
+
+					if (!READ_ONCE(p->pt_replica)) {
+						pr_err("MITOSIS VERIFY enable: PMD at [%d][%d][%d] "
+						       "has no replicas\n", gi, p4i, pui);
+						BUG();
+					}
+					mitosis_verify_chain_integrity(p, mm,
+								       MITOSIS_CACHE_PMD);
 				}
 
 				pmd_base = pmd_offset(&pud_base[pui], 0);
@@ -1025,11 +1873,17 @@ static void verify_enable_walk_tree(struct mm_struct *mm, const char *caller)
 						continue;
 
 					cphys = pmd_val(pmval) & PTE_PFN_MASK;
-					if (cphys && !READ_ONCE(pfn_to_page(cphys >> PAGE_SHIFT)->pt_replica)) {
-						pr_err("MITOSIS VERIFY enable: PTE at "
-						       "[%d][%d][%d][%d] has no replicas\n",
-						       gi, p4i, pui, pmi);
-						BUG();
+					if (cphys) {
+						struct page *p = pfn_to_page(cphys >> PAGE_SHIFT);
+
+						if (!READ_ONCE(p->pt_replica)) {
+							pr_err("MITOSIS VERIFY enable: PTE at "
+							       "[%d][%d][%d][%d] has no replicas\n",
+							       gi, p4i, pui, pmi);
+							BUG();
+						}
+						mitosis_verify_chain_integrity(p, mm,
+									       MITOSIS_CACHE_PTE);
 					}
 				}
 			}
@@ -1069,6 +1923,12 @@ void mitosis_verify_after_enable(struct mm_struct *mm)
 	}
 
 	verify_enable_walk_tree(mm, "enable");
+
+	mitosis_verify_tree_consistency(mm);
+
+	mitosis_verify_pti_consistency(mm);
+
+	mitosis_verify_mm_coherence(mm);
 }
 EXPORT_SYMBOL(mitosis_verify_after_enable);
 

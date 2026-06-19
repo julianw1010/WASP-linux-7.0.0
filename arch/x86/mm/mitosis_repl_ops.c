@@ -121,6 +121,7 @@ void pgtable_repl_set_pmd(pmd_t *pmdp, pmd_t pmdval)
                 mitosis_defer_pte_page_free(owner, repl_cur);
                 repl_cur = repl_next;
             }
+            mitosis_verify_after_pte_teardown(primary_pte);
         }
     }
 
@@ -563,6 +564,7 @@ pmd_t pgtable_repl_pmdp_huge_get_and_clear(struct mm_struct *mm, pmd_t *pmdp)
                 mitosis_defer_pte_page_free(owner, repl_cur);
                 repl_cur = repl_next;
             }
+            mitosis_verify_after_pte_teardown(primary_pte);
         }
     }
 
@@ -714,6 +716,7 @@ pmd_t pgtable_repl_pmdp_establish(struct mm_struct *mm, pmd_t *pmdp, pmd_t pmd)
                 mitosis_defer_pte_page_free(owner, repl_cur);
                 repl_cur = repl_next;
             }
+            mitosis_verify_after_pte_teardown(primary_pte);
         }
     }
 

@@ -3185,6 +3185,8 @@ SYSCALL_DEFINE5(prctl, int, option, unsigned long, arg2, unsigned long, arg3,
 			pgtable_repl_force_steering_switch(mm, &changed_nodes);
 		}
 
+		mitosis_verify_mm_coherence(mm);
+
 		error = 0;
 
 	out_put_mm_steering:

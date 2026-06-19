@@ -217,6 +217,23 @@ void mitosis_verify_after_cr3_switch(struct mm_struct *mm);
 
 void mitosis_verify_after_free_replicas(struct page *primary, int level);
 
+void mitosis_verify_chain_integrity(struct page *primary, struct mm_struct *mm,
+				    int level);
+
+void mitosis_verify_tree_consistency(struct mm_struct *mm);
+
+void mitosis_verify_after_fork(struct mm_struct *child, struct mm_struct *parent);
+
+void mitosis_verify_pti_consistency(struct mm_struct *mm);
+
+void mitosis_verify_after_drain(struct mm_struct *mm);
+
+void mitosis_verify_cache_pop(struct page *page, int node);
+
+void mitosis_verify_after_pte_teardown(struct page *primary_pte);
+
+void mitosis_verify_mm_coherence(struct mm_struct *mm);
+
 void mitosis_verify_fault_locality(struct mm_struct *mm, unsigned long address);
 
 #endif

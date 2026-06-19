@@ -1224,6 +1224,7 @@ void mmput(struct mm_struct *mm)
 			WARN_ON_ONCE(!nodes_empty(mm->repl_pgd_nodes));
 		}
 		mitosis_drain_deferred_pages(mm);
+		mitosis_verify_after_drain(mm);
 		__mmput(mm);
 	}
 }
@@ -1633,6 +1634,7 @@ static int copy_mm(u64 clone_flags, struct task_struct *tsk)
 
 		if (sysctl_mitosis_inherit == 1 && parent_had_mitosis) {
 			pgtable_repl_enable(mm, saved_nodes);
+			mitosis_verify_after_fork(mm, oldmm);
 		}
 	}
 

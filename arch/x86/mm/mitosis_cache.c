@@ -73,6 +73,8 @@ struct page *mitosis_cache_pop(int node, int level)
 
 	clear_highpage(page);
 
+	mitosis_verify_cache_pop(page, node);
+
 	return page;
 }
 EXPORT_SYMBOL(mitosis_cache_pop);
@@ -147,6 +149,7 @@ void mitosis_drain_deferred_pages(struct mm_struct *mm)
 {
     struct page *page, *next;
     unsigned long flags;
+    int count = 0;
 
     if (!mm || !READ_ONCE(mm->mitosis_deferred_pages))
         return;
@@ -160,6 +163,22 @@ void mitosis_drain_deferred_pages(struct mm_struct *mm)
         int nid = page_to_nid(page);
         bool from_cache = PageMitosisFromCache(page);
         next = page->pt_replica;
+
+        if (READ_ONCE(sysctl_mitosis_verify_enabled)) {
+            if (page->pt_owner_mm) {
+                pr_err("MITOSIS VERIFY drain: page pfn=0x%lx on "
+                       "deferred list still has pt_owner_mm=%px\n",
+                       page_to_pfn(page), page->pt_owner_mm);
+                BUG();
+            }
+            count++;
+            if (count > 100000) {
+                pr_err("MITOSIS VERIFY drain: deferred list too "
+                       "long, possible cycle mm=%px\n", mm);
+                BUG();
+            }
+        }
+
         page->pt_replica = NULL;
         ClearPageMitosisFromCache(page);
         if (from_cache && mitosis_cache_push(page, nid, MITOSIS_CACHE_PTE)) {

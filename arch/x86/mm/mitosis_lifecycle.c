@@ -114,6 +114,9 @@ static bool replicate_and_link_page(struct page *page, struct mm_struct *mm,
     BUG_ON(!link_page_replicas(pages, count));
 
     smp_mb();
+
+    mitosis_verify_chain_integrity(page, mm, -1);
+
     return true;
 }
 
@@ -450,6 +453,8 @@ int pgtable_repl_enable(struct mm_struct *mm, nodemask_t nodes)
     }
 
     BUG_ON(!link_page_replicas(pgd_pages, count));
+
+    mitosis_verify_chain_integrity(base_page, mm, MITOSIS_CACHE_PGD);
 
     mm->repl_pgd_nodes = nodes;
     memset(mm->pgd_replicas, 0, sizeof(mm->pgd_replicas));
