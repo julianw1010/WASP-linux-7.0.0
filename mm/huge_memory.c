@@ -1336,7 +1336,7 @@ static vm_fault_t __do_huge_pmd_anonymous_page(struct vm_fault *vmf)
 	if (unlikely(!folio))
 		return VM_FAULT_FALLBACK;
 
-	pgtable = pte_alloc_one(vma->vm_mm);
+	pgtable = pte_alloc_one(vma->vm_mm, vmf->pmd);
 	if (unlikely(!pgtable)) {
 		ret = VM_FAULT_OOM;
 		goto release;
@@ -1482,7 +1482,7 @@ vm_fault_t do_huge_pmd_anonymous_page(struct vm_fault *vmf)
 		struct folio *zero_folio;
 		vm_fault_t ret;
 
-		pgtable = pte_alloc_one(vma->vm_mm);
+		pgtable = pte_alloc_one(vma->vm_mm, vmf->pmd);
 		if (unlikely(!pgtable))
 			return VM_FAULT_OOM;
 		zero_folio = mm_get_huge_zero_folio(vma->vm_mm);
@@ -1540,7 +1540,7 @@ static vm_fault_t insert_pmd(struct vm_area_struct *vma, unsigned long addr,
 		return VM_FAULT_SIGBUS;
 
 	if (arch_needs_pgtable_deposit()) {
-		pgtable = pte_alloc_one(vma->vm_mm);
+		pgtable = pte_alloc_one(vma->vm_mm, pmd);
 		if (!pgtable)
 			return VM_FAULT_OOM;
 	}
@@ -1884,7 +1884,7 @@ int copy_huge_pmd(struct mm_struct *dst_mm, struct mm_struct *src_mm,
 	if (!vma_is_anonymous(dst_vma))
 		return 0;
 
-	pgtable = pte_alloc_one(dst_mm);
+	pgtable = pte_alloc_one(dst_mm, dst_pmd);
 	if (unlikely(!pgtable))
 		goto out;
 
@@ -3177,23 +3177,6 @@ static void __split_huge_pmd_locked(struct vm_area_struct *vma, pmd_t *pmd,
 	 * This's critical for some architectures (Power).
 	 */
 	pgtable = pgtable_trans_huge_withdraw(mm, pmd);
-	
-	if (smp_load_acquire(&mm->repl_pgd_enabled) && virt_addr_valid(pmd)) {
-	    int pmd_node = page_to_nid(virt_to_page(pmd));
-	    int pte_node = page_to_nid(pgtable);
-	    if (pmd_node != pte_node) {
-		struct page *new_pte = mitosis_alloc_replica_page(pmd_node, 0);
-		if (new_pte && pagetable_pte_ctor(mm, page_ptdesc(new_pte))) {
-		    new_pte->pt_owner_mm = mm;
-		    pagetable_dtor(page_ptdesc(pgtable));
-		    __free_page(pgtable);
-		    pgtable = new_pte;
-		} else if (new_pte) {
-		    __free_page(new_pte);
-		}
-	    }
-	}
-	
 	pmd_populate_no_rep(mm, &_pmd, pgtable);
 
 	pte = pte_offset_map(&_pmd, haddr);

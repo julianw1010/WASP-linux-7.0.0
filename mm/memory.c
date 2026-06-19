@@ -465,7 +465,7 @@ void pmd_install(struct mm_struct *mm, pmd_t *pmd, pgtable_t *pte)
 
 int __pte_alloc(struct mm_struct *mm, pmd_t *pmd)
 {
-	pgtable_t new = pte_alloc_one(mm);
+	pgtable_t new = pte_alloc_one(mm, pmd);
 	if (!new)
 		return -ENOMEM;
 
@@ -5358,7 +5358,7 @@ static vm_fault_t __do_fault(struct vm_fault *vmf)
 	 *				# flush A, B to clear the writeback
 	 */
 	if (pmd_none(*vmf->pmd) && !vmf->prealloc_pte) {
-		vmf->prealloc_pte = pte_alloc_one(vma->vm_mm);
+		vmf->prealloc_pte = pte_alloc_one(vma->vm_mm, vmf->pmd);
 		if (!vmf->prealloc_pte)
 			return VM_FAULT_OOM;
 	}
@@ -5446,7 +5446,7 @@ vm_fault_t do_set_pmd(struct vm_fault *vmf, struct folio *folio, struct page *pa
 	 * related to pte entry. Use the preallocated table for that.
 	 */
 	if (arch_needs_pgtable_deposit() && !vmf->prealloc_pte) {
-		vmf->prealloc_pte = pte_alloc_one(vma->vm_mm);
+		vmf->prealloc_pte = pte_alloc_one(vma->vm_mm, vmf->pmd);
 		if (!vmf->prealloc_pte)
 			return VM_FAULT_OOM;
 	}
@@ -5750,7 +5750,7 @@ static vm_fault_t do_fault_around(struct vm_fault *vmf)
 		      pte_off + vma_pages(vmf->vma) - vma_off) - 1;
 
 	if (pmd_none(*vmf->pmd)) {
-		vmf->prealloc_pte = pte_alloc_one(vmf->vma->vm_mm);
+		vmf->prealloc_pte = pte_alloc_one(vmf->vma->vm_mm, vmf->pmd);
 		if (!vmf->prealloc_pte)
 			return VM_FAULT_OOM;
 	}
@@ -6666,7 +6666,7 @@ EXPORT_SYMBOL_GPL(handle_mm_fault);
  */
 int __p4d_alloc(struct mm_struct *mm, pgd_t *pgd, unsigned long address)
 {
-	p4d_t *new = p4d_alloc_one(mm, address);
+	p4d_t *new = p4d_alloc_one(mm, address, pgd);
 	if (!new)
 		return -ENOMEM;
 
@@ -6689,7 +6689,7 @@ int __p4d_alloc(struct mm_struct *mm, pgd_t *pgd, unsigned long address)
  */
 int __pud_alloc(struct mm_struct *mm, p4d_t *p4d, unsigned long address)
 {
-	pud_t *new = pud_alloc_one(mm, address);
+	pud_t *new = pud_alloc_one(mm, address, p4d);
 	if (!new)
 		return -ENOMEM;
 
@@ -6713,7 +6713,7 @@ int __pud_alloc(struct mm_struct *mm, p4d_t *p4d, unsigned long address)
 int __pmd_alloc(struct mm_struct *mm, pud_t *pud, unsigned long address)
 {
 	spinlock_t *ptl;
-	pmd_t *new = pmd_alloc_one(mm, address);
+	pmd_t *new = pmd_alloc_one(mm, address, pud);
 	if (!new)
 		return -ENOMEM;
 
