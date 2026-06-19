@@ -649,23 +649,6 @@ void mitosis_verify_pti_consistency(struct mm_struct *mm)
 }
 EXPORT_SYMBOL(mitosis_verify_pti_consistency);
 
-void mitosis_verify_after_drain(struct mm_struct *mm)
-{
-	if (!READ_ONCE(sysctl_mitosis_verify_enabled))
-		return;
-
-	if (!mm)
-		return;
-
-	if (READ_ONCE(mm->mitosis_deferred_pages)) {
-		pr_err("MITOSIS VERIFY drain: deferred list not empty "
-		       "after drain mm=%px head=%px\n",
-		       mm, mm->mitosis_deferred_pages);
-		BUG();
-	}
-}
-EXPORT_SYMBOL(mitosis_verify_after_drain);
-
 void mitosis_verify_cache_pop(struct page *page, int node)
 {
 	unsigned long *entries;
@@ -716,30 +699,6 @@ void mitosis_verify_cache_pop(struct page *page, int node)
 	}
 }
 EXPORT_SYMBOL(mitosis_verify_cache_pop);
-
-void mitosis_verify_after_pte_teardown(struct page *primary_pte)
-{
-	if (!READ_ONCE(sysctl_mitosis_verify_enabled))
-		return;
-
-	if (!primary_pte)
-		return;
-
-	if (!pfn_valid(page_to_pfn(primary_pte))) {
-		pr_err("MITOSIS VERIFY pte_teardown: invalid pfn=0x%lx\n",
-		       page_to_pfn(primary_pte));
-		BUG();
-	}
-
-	if (READ_ONCE(primary_pte->pt_replica)) {
-		pr_err("MITOSIS VERIFY pte_teardown: pfn=0x%lx still has "
-		       "pt_replica=%px after teardown\n",
-		       page_to_pfn(primary_pte),
-		       primary_pte->pt_replica);
-		BUG();
-	}
-}
-EXPORT_SYMBOL(mitosis_verify_after_pte_teardown);
 
 void mitosis_verify_mm_coherence(struct mm_struct *mm)
 {

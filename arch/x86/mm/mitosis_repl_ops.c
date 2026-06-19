@@ -61,7 +61,6 @@ void pgtable_repl_set_pmd(pmd_t *pmdp, pmd_t pmdval)
     const unsigned long pfn_mask = PTE_PFN_MASK;
     bool has_child;
     bool child_has_replicas = false;
-    pmd_t old_primary;
 
     if (!pmdp ||
         !virt_addr_valid(pmdp))
@@ -96,32 +95,6 @@ void pgtable_repl_set_pmd(pmd_t *pmdp, pmd_t pmdval)
                 child_base_page = child_page;
                 child_has_replicas = (READ_ONCE(child_base_page->pt_replica) != NULL);
             }
-        }
-    }
-
-    old_primary = *pmdp;
-
-    if (pmd_present(old_primary) &&
-        !pmd_trans_huge(old_primary) &&
-        !pmd_leaf(old_primary) &&
-        !pmd_bad(old_primary) &&
-        pmd_val(old_primary) != 0 &&
-        (pmd_trans_huge(pmdval) || pmd_leaf(pmdval) || !pmd_present(pmdval))) {
-        unsigned long old_child_phys = pmd_val(old_primary) & pfn_mask;
-        if (old_child_phys && pfn_valid(old_child_phys >> PAGE_SHIFT)) {
-            struct page *primary_pte = pfn_to_page(old_child_phys >> PAGE_SHIFT);
-            struct page *repl_cur = xchg(&primary_pte->pt_replica, NULL);
-            struct page *repl_start = primary_pte;
-            struct mm_struct *owner;
-            while (repl_cur && repl_cur != repl_start) {
-                struct page *repl_next = READ_ONCE(repl_cur->pt_replica);
-                owner = repl_cur->pt_owner_mm;
-                if (owner)
-                    mm_dec_nr_ptes(owner);
-                mitosis_defer_pte_page_free(owner, repl_cur);
-                repl_cur = repl_next;
-            }
-            mitosis_verify_after_pte_teardown(primary_pte);
         }
     }
 
@@ -545,29 +518,6 @@ pmd_t pgtable_repl_pmdp_huge_get_and_clear(struct mm_struct *mm, pmd_t *pmdp)
     val = pmd_val(native_pmdp_get_and_clear(pmdp));
     flags = pmd_flags(__pmd(val));
 
-    if (pmd_present(__pmd(val)) &&
-        !pmd_trans_huge(__pmd(val)) &&
-        !pmd_leaf(__pmd(val)) &&
-        !pmd_bad(__pmd(val)) &&
-        val != 0) {
-        unsigned long old_child_phys = val & PTE_PFN_MASK;
-        if (old_child_phys && pfn_valid(old_child_phys >> PAGE_SHIFT)) {
-            struct page *primary_pte = pfn_to_page(old_child_phys >> PAGE_SHIFT);
-            struct page *repl_cur = xchg(&primary_pte->pt_replica, NULL);
-            struct page *repl_start = primary_pte;
-            struct mm_struct *owner;
-            while (repl_cur && repl_cur != repl_start) {
-                struct page *repl_next = READ_ONCE(repl_cur->pt_replica);
-                owner = repl_cur->pt_owner_mm;
-                if (owner)
-                    mm_dec_nr_ptes(owner);
-                mitosis_defer_pte_page_free(owner, repl_cur);
-                repl_cur = repl_next;
-            }
-            mitosis_verify_after_pte_teardown(primary_pte);
-        }
-    }
-
     offset = ((unsigned long)pmdp) & ~PAGE_MASK;
     start_page = pmd_page;
 
@@ -695,29 +645,6 @@ pmd_t pgtable_repl_pmdp_establish(struct mm_struct *mm, pmd_t *pmdp, pmd_t pmd)
     } else {
         val = pmd_val(*pmdp);
         WRITE_ONCE(*pmdp, pmd);
-    }
-
-    if (pmd_present(__pmd(val)) &&
-        !pmd_trans_huge(__pmd(val)) &&
-        !pmd_leaf(__pmd(val)) &&
-        !pmd_bad(__pmd(val)) &&
-        val != 0) {
-        unsigned long old_child_phys = val & PTE_PFN_MASK;
-        if (old_child_phys && pfn_valid(old_child_phys >> PAGE_SHIFT)) {
-            struct page *primary_pte = pfn_to_page(old_child_phys >> PAGE_SHIFT);
-            struct page *repl_cur = xchg(&primary_pte->pt_replica, NULL);
-            struct page *repl_start = primary_pte;
-            struct mm_struct *owner;
-            while (repl_cur && repl_cur != repl_start) {
-                struct page *repl_next = READ_ONCE(repl_cur->pt_replica);
-                owner = repl_cur->pt_owner_mm;
-                if (owner)
-                    mm_dec_nr_ptes(owner);
-                mitosis_defer_pte_page_free(owner, repl_cur);
-                repl_cur = repl_next;
-            }
-            mitosis_verify_after_pte_teardown(primary_pte);
-        }
     }
 
     cur_page = READ_ONCE(pmd_page->pt_replica);

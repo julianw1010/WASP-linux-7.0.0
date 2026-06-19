@@ -1167,8 +1167,6 @@ struct mm_struct {
 		nodemask_t repl_pending_nodes;
 		struct mutex repl_mutex;
 		spinlock_t repl_alloc_lock;
-		spinlock_t mitosis_deferred_lock;
-		struct page *mitosis_deferred_pages;
 		pgd_t *pgd_replicas[NUMA_NODE_COUNT];
 		pgd_t *original_pgd;
 		int repl_steering[NUMA_NODE_COUNT];

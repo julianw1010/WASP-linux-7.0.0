@@ -37,9 +37,6 @@ void pgtable_repl_pmdp_set_wrprotect(struct mm_struct *mm,
                                    
 void pgtable_repl_free_pte_replicas(struct mm_struct *mm, struct page *page);  
 
-void mitosis_defer_pte_page_free(struct mm_struct *mm, struct page *page);
-void mitosis_drain_deferred_pages(struct mm_struct *mm);
-
 pmd_t pgtable_repl_pmdp_establish(struct mm_struct *mm, pmd_t *pmdp, pmd_t pmd);
 
 int pgtable_repl_pmdp_test_and_clear_young(struct vm_area_struct *vma,
@@ -226,11 +223,7 @@ void mitosis_verify_after_fork(struct mm_struct *child, struct mm_struct *parent
 
 void mitosis_verify_pti_consistency(struct mm_struct *mm);
 
-void mitosis_verify_after_drain(struct mm_struct *mm);
-
 void mitosis_verify_cache_pop(struct page *page, int node);
-
-void mitosis_verify_after_pte_teardown(struct page *primary_pte);
 
 void mitosis_verify_mm_coherence(struct mm_struct *mm);
 

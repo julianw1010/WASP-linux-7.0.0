@@ -1123,8 +1123,6 @@ static struct mm_struct *mm_init(struct mm_struct *mm, struct task_struct *p,
 	nodes_clear(mm->repl_pending_nodes);
 	mutex_init(&mm->repl_mutex);
 	spin_lock_init(&mm->repl_alloc_lock);
-	spin_lock_init(&mm->mitosis_deferred_lock);
-	mm->mitosis_deferred_pages = NULL;
 
 	memset(mm->pgd_replicas, 0, sizeof(mm->pgd_replicas));
 	mm->original_pgd = NULL;
@@ -1223,8 +1221,6 @@ void mmput(struct mm_struct *mm)
 			WARN_ON_ONCE(mm->repl_pgd_enabled);
 			WARN_ON_ONCE(!nodes_empty(mm->repl_pgd_nodes));
 		}
-		mitosis_drain_deferred_pages(mm);
-		mitosis_verify_after_drain(mm);
 		__mmput(mm);
 	}
 }

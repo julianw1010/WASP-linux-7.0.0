@@ -1582,8 +1582,6 @@ void flush_tlb_mm_range(struct mm_struct *mm, unsigned long start,
 	}
 
 	put_flush_tlb_info();
-	mitosis_drain_deferred_pages(mm);
-	mitosis_verify_after_drain(mm);
 	put_cpu();
 	mmu_notifier_arch_invalidate_secondary_tlbs(mm, start, end);
 }
