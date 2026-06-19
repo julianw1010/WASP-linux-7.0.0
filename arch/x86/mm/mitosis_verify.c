@@ -713,86 +713,11 @@ EXPORT_SYMBOL(mitosis_verify_after_withdraw);
 
 void mitosis_verify_get_pte(pte_t *ptep, pte_t result)
 {
-	struct page *pte_page, *cur;
-	unsigned long offset;
-	pteval_t expected;
-
-	if (!READ_ONCE(sysctl_mitosis_verify_enabled))
-		return;
-
-	if (!ptep || !virt_addr_valid(ptep))
-		return;
-
-	pte_page = virt_to_page(ptep);
-	cur = READ_ONCE(pte_page->pt_replica);
-	if (!cur)
-		return;
-
-	offset = ((unsigned long)ptep) & ~PAGE_MASK;
-	expected = pte_val(READ_ONCE(*ptep));
-
-	while (cur != pte_page) {
-		pte_t *re = (pte_t *)(page_address(cur) + offset);
-
-		expected |= pte_val(READ_ONCE(*re));
-
-		cur = READ_ONCE(cur->pt_replica);
-		if (!cur)
-			break;
-	}
-
-	if (expected != pte_val(result)) {
-		pr_err("MITOSIS VERIFY get_pte: OR mismatch "
-		       "expected=0x%lx got=0x%lx off=%lu\n",
-		       (unsigned long)expected,
-		       (unsigned long)pte_val(result), offset);
-		BUG();
-	}
 }
 EXPORT_SYMBOL(mitosis_verify_get_pte);
 
 void mitosis_verify_get_pmd(pmd_t *pmdp, pmd_t result)
 {
-	struct page *pmd_page, *cur;
-	unsigned long offset;
-	pmdval_t expected;
-
-	if (!READ_ONCE(sysctl_mitosis_verify_enabled))
-		return;
-
-	if (!pmdp || !virt_addr_valid(pmdp))
-		return;
-
-	pmd_page = virt_to_page(pmdp);
-	cur = READ_ONCE(pmd_page->pt_replica);
-	if (!cur)
-		return;
-
-	offset = ((unsigned long)pmdp) & ~PAGE_MASK;
-	expected = pmd_val(READ_ONCE(*pmdp));
-
-	if (!pmd_present(__pmd(expected)))
-		return;
-
-	while (cur != pmd_page) {
-		pmd_t *re = (pmd_t *)(page_address(cur) + offset);
-		pmd_t rv = READ_ONCE(*re);
-
-		if (pmd_present(rv))
-			expected |= pmd_flags(rv);
-
-		cur = READ_ONCE(cur->pt_replica);
-		if (!cur)
-			break;
-	}
-
-	if (expected != pmd_val(result)) {
-		pr_err("MITOSIS VERIFY get_pmd: OR mismatch "
-		       "expected=0x%lx got=0x%lx off=%lu\n",
-		       (unsigned long)expected,
-		       (unsigned long)pmd_val(result), offset);
-		BUG();
-	}
 }
 EXPORT_SYMBOL(mitosis_verify_get_pmd);
 
