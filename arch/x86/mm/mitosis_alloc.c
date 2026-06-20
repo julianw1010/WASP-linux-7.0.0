@@ -360,16 +360,8 @@ void pgtable_repl_alloc_pte(struct mm_struct *mm, unsigned long pfn)
 	for (i = 1; i < count; i++)
 		memcpy(page_address(pages[i]), src_addr, PAGE_SIZE);
 
-	if (!mm->repl_pgd_enabled ||
-	    !link_page_replicas(pages, count)) {
-		for (i = 1; i < count; i++) {
-			pagetable_dtor(page_ptdesc(pages[i]));
-			mm_dec_nr_ptes(mm);
-			pages[i]->pt_owner_mm = NULL;
-			__free_page(pages[i]);
-		}
-		return;
-	}
+	BUG_ON(!mm->repl_pgd_enabled);
+	BUG_ON(!link_page_replicas(pages, count));
 
 	mitosis_verify_after_repl_alloc(mm, pfn, MITOSIS_CACHE_PTE);
 }
@@ -398,16 +390,8 @@ void pgtable_repl_alloc_pmd(struct mm_struct *mm, unsigned long pfn)
 	for (i = 1; i < count; i++)
 		memcpy(page_address(pages[i]), src_addr, PAGE_SIZE);
 
-	if (!mm->repl_pgd_enabled ||
-	    !link_page_replicas(pages, count)) {
-		for (i = 1; i < count; i++) {
-			pagetable_dtor(page_ptdesc(pages[i]));
-			mm_dec_nr_pmds(mm);
-			pages[i]->pt_owner_mm = NULL;
-			__free_page(pages[i]);
-		}
-		return;
-	}
+	BUG_ON(!mm->repl_pgd_enabled);
+	BUG_ON(!link_page_replicas(pages, count));
 
 	mitosis_verify_after_repl_alloc(mm, pfn, MITOSIS_CACHE_PMD);
 }
@@ -436,15 +420,8 @@ void pgtable_repl_alloc_pud(struct mm_struct *mm, unsigned long pfn)
 	for (i = 1; i < count; i++)
 		memcpy(page_address(pages[i]), src_addr, PAGE_SIZE);
 
-	if (!mm->repl_pgd_enabled ||
-	    !link_page_replicas(pages, count)) {
-		for (i = 1; i < count; i++) {
-			mm_dec_nr_puds(mm);
-			pages[i]->pt_owner_mm = NULL;
-			__free_page(pages[i]);
-		}
-		return;
-	}
+	BUG_ON(!mm->repl_pgd_enabled);
+	BUG_ON(!link_page_replicas(pages, count));
 
 	mitosis_verify_after_repl_alloc(mm, pfn, MITOSIS_CACHE_PUD);
 }
@@ -473,14 +450,8 @@ void pgtable_repl_alloc_p4d(struct mm_struct *mm, unsigned long pfn)
 	for (i = 1; i < count; i++)
 		memcpy(page_address(pages[i]), src_addr, PAGE_SIZE);
 
-	if (!mm->repl_pgd_enabled ||
-	    !link_page_replicas(pages, count)) {
-		for (i = 1; i < count; i++) {
-			pages[i]->pt_owner_mm = NULL;
-			__free_page(pages[i]);
-		}
-		return;
-	}
+	BUG_ON(!mm->repl_pgd_enabled);
+	BUG_ON(!link_page_replicas(pages, count));
 
 	mitosis_verify_after_repl_alloc(mm, pfn, MITOSIS_CACHE_P4D);
 }

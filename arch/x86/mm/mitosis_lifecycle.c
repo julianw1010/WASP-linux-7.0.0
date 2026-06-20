@@ -488,8 +488,7 @@ int pgtable_repl_enable(struct mm_struct *mm)
 	base_page->pt_replica = NULL;
 
 	ret = alloc_pgd_replicas(base_page, mm, pgd_pages, &count);
-	if (ret)
-		goto fail_cleanup;
+	BUG_ON(ret);
 
 	for (i = 1; i < count; i++) {
 		pgd_t *dst_pgd = page_address(pgd_pages[i]);
@@ -540,14 +539,6 @@ int pgtable_repl_enable(struct mm_struct *mm)
 	mitosis_verify_after_enable(mm);
 
 	return 0;
-
-fail_cleanup:
-	base_page->pt_replica = NULL;
-	mm->repl_pgd_enabled = false;
-	mm->repl_in_progress = false;
-	nodes_clear(mm->repl_pgd_nodes);
-	memset(mm->pgd_replicas, 0, sizeof(mm->pgd_replicas));
-	mm->original_pgd = NULL;
 
 out_unlock:
 	mutex_unlock(&mm->repl_mutex);

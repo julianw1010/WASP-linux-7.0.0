@@ -82,19 +82,10 @@ static inline pgtable_t __pte_alloc_one_noprof(struct mm_struct *mm, gfp_t gfp,
 	page = mitosis_cache_pop(node, MITOSIS_CACHE_PTE);
 	if (!page)
 		page = alloc_pages_node(node, gfp | __GFP_THISNODE, 0);
-	if (!page)
-		return NULL;
+	BUG_ON(!page);
 
 	ptdesc = page_ptdesc(page);
-	if (!pagetable_pte_ctor(mm, ptdesc)) {
-		if (PageMitosisFromCache(page)) {
-			page->pt_replica = NULL;
-			mitosis_cache_push(page, page_to_nid(page), MITOSIS_CACHE_PTE);
-		} else {
-			pagetable_free(ptdesc);
-		}
-		return NULL;
-	}
+	BUG_ON(!pagetable_pte_ctor(mm, ptdesc));
 
 	page->pt_owner_mm = mm;
 	return ptdesc_page(ptdesc);
@@ -186,19 +177,10 @@ static inline pmd_t *pmd_alloc_one_noprof(struct mm_struct *mm, unsigned long ad
 	page = mitosis_cache_pop(node, MITOSIS_CACHE_PMD);
 	if (!page)
 		page = alloc_pages_node(node, gfp | __GFP_THISNODE, 0);
-	if (!page)
-		return NULL;
+	BUG_ON(!page);
 
 	ptdesc = page_ptdesc(page);
-	if (!pagetable_pmd_ctor(mm, ptdesc)) {
-		if (PageMitosisFromCache(page)) {
-			page->pt_replica = NULL;
-			mitosis_cache_push(page, page_to_nid(page), MITOSIS_CACHE_PMD);
-		} else {
-			pagetable_free(ptdesc);
-		}
-		return NULL;
-	}
+	BUG_ON(!pagetable_pmd_ctor(mm, ptdesc));
 
 	page->pt_owner_mm = mm;
 	return ptdesc_address(ptdesc);
