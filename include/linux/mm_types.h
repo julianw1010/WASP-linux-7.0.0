@@ -1164,7 +1164,6 @@ struct mm_struct {
 		bool repl_pending_enable;
 		bool cache_only_mode;
 		nodemask_t repl_pgd_nodes;
-		nodemask_t repl_pending_nodes;
 		struct mutex repl_mutex;
 		spinlock_t repl_alloc_lock;
 		pgd_t *pgd_replicas[NUMA_NODE_COUNT];

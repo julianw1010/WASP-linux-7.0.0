@@ -1462,10 +1462,8 @@ static struct linux_binprm *alloc_bprm(int fd, struct filename *filename, int fl
 			bprm->mm->cache_only_mode = current->mm->cache_only_mode;
 		}
 
-		if (current->mm && current->mm->repl_pgd_enabled &&
-		    !nodes_empty(current->mm->repl_pgd_nodes)) {
+		if (current->mm && current->mm->repl_pgd_enabled) {
 			bprm->mm->repl_pending_enable = true;
-			bprm->mm->repl_pending_nodes = current->mm->repl_pgd_nodes;
 		}
 
 		return bprm;
@@ -1771,9 +1769,8 @@ static int bprm_execve(struct linux_binprm *bprm)
 	task_numa_free(current, false);
 
 	if (current->mm && current->mm->repl_pending_enable) {
-		pgtable_repl_enable(current->mm, current->mm->repl_pending_nodes);
+		pgtable_repl_enable(current->mm);
 		current->mm->repl_pending_enable = false;
-		nodes_clear(current->mm->repl_pending_nodes);
 	}
 
 	return retval;

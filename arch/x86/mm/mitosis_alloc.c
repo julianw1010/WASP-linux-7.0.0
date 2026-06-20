@@ -224,18 +224,19 @@ int alloc_p4d_replicas(struct page *base_page, struct mm_struct *mm,
 }
 
 int alloc_pgd_replicas(struct page *base_page, struct mm_struct *mm,
-		       nodemask_t nodes,
 		       struct page **pages, int *count)
 {
 	int i;
 	int base_node;
 	int expected_count;
 	int alloc_order = mitosis_pgd_alloc_order();
+	nodemask_t nodes;
 
 	if (!base_page || !pages || !count)
 		return -EINVAL;
 
 	*count = 0;
+	nodes = node_online_map;
 	expected_count = nodes_weight(nodes);
 	if (expected_count < 2 || expected_count > NUMA_NODE_COUNT)
 		return -EINVAL;

@@ -1120,7 +1120,6 @@ static struct mm_struct *mm_init(struct mm_struct *mm, struct task_struct *p,
 	mm->repl_pending_enable = false;
 	mm->cache_only_mode = false;
 	nodes_clear(mm->repl_pgd_nodes);
-	nodes_clear(mm->repl_pending_nodes);
 	mutex_init(&mm->repl_mutex);
 	spin_lock_init(&mm->repl_alloc_lock);
 
@@ -1611,16 +1610,12 @@ static int copy_mm(u64 clone_flags, struct task_struct *tsk)
 		mm = oldmm;
 	} else {
 		bool parent_had_mitosis = false;
-		nodemask_t saved_nodes;
-
-		nodes_clear(saved_nodes);
 
 		mutex_lock(&oldmm->repl_mutex);
 		if (oldmm->repl_pgd_enabled &&
 		    !nodes_empty(oldmm->repl_pgd_nodes) &&
 		    nodes_weight(oldmm->repl_pgd_nodes) >= 2) {
 			parent_had_mitosis = true;
-			saved_nodes = oldmm->repl_pgd_nodes;
 		}
 		mutex_unlock(&oldmm->repl_mutex);
 
@@ -1629,7 +1624,7 @@ static int copy_mm(u64 clone_flags, struct task_struct *tsk)
 			return -ENOMEM;
 
 		if (sysctl_mitosis_inherit == 1 && parent_had_mitosis) {
-			pgtable_repl_enable(mm, saved_nodes);
+			pgtable_repl_enable(mm);
 			mitosis_verify_after_fork(mm, oldmm);
 		}
 	}

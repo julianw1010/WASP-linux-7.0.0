@@ -58,7 +58,7 @@ int mitosis_cache_drain_all(void);
 
 extern int sysctl_mitosis_inherit;
 
-int pgtable_repl_enable(struct mm_struct *mm, nodemask_t nodes);
+int pgtable_repl_enable(struct mm_struct *mm);
 void pgtable_repl_disable(struct mm_struct *mm);
 void pgtable_repl_set_pgd(pgd_t *pgd, pgd_t pgdval);
 void pgtable_repl_set_p4d(p4d_t *p4d, p4d_t p4dval);
@@ -85,7 +85,7 @@ int mitosis_inherit_sysctl_handler(struct ctl_table *table, int write,
 
 pte_t pgtable_repl_ptep_get_and_clear(struct mm_struct *mm, pte_t *ptep);
 
-int pgtable_repl_enable_external(struct task_struct *target, nodemask_t nodes);
+int pgtable_repl_enable_external(struct task_struct *target);
 
 int pgtable_repl_disable_external(struct task_struct *target);
 
@@ -156,7 +156,7 @@ int alloc_pud_replicas(struct page *base_page, struct mm_struct *mm,
 int alloc_p4d_replicas(struct page *base_page, struct mm_struct *mm,
 		       struct page **pages, int *count);
 int alloc_pgd_replicas(struct page *base_page, struct mm_struct *mm,
-		       nodemask_t nodes, struct page **pages, int *count);
+		       struct page **pages, int *count);
 int mitosis_free_replica_chain(struct page *primary, int level, int order);
 
 extern int sysctl_mitosis_verify_enabled;

@@ -456,20 +456,21 @@ static void replicate_existing_pagetables_phase2(struct mm_struct *mm)
 	smp_mb();
 }
 
-int pgtable_repl_enable(struct mm_struct *mm, nodemask_t nodes)
+int pgtable_repl_enable(struct mm_struct *mm)
 {
 	struct page *pgd_pages[NUMA_NODE_COUNT];
 	struct page *base_page;
 	pgd_t *base_pgd;
-	int node, count = 0, base_node, ret = 0, i;
+	nodemask_t nodes;
+	int count = 0, base_node, ret = 0, i;
 
-	if (!mm || mm == &init_mm || nodes_empty(nodes) || nodes_weight(nodes) < 2)
+	if (!mm || mm == &init_mm)
 		return -EINVAL;
 
-	for_each_node_mask(node, nodes) {
-		if (!node_online(node))
-			return -EINVAL;
-	}
+	nodes = node_online_map;
+
+	if (nodes_weight(nodes) < 2)
+		return -EINVAL;
 
 	for (i = 0; i < NUMA_NODE_COUNT; i++)
 		WRITE_ONCE(mm->repl_steering[i], -1);
@@ -478,7 +479,7 @@ int pgtable_repl_enable(struct mm_struct *mm, nodemask_t nodes)
 	mutex_lock(&mm->repl_mutex);
 
 	if (mm->repl_pgd_enabled) {
-		ret = nodes_equal(mm->repl_pgd_nodes, nodes) ? 0 : -EALREADY;
+		ret = 0;
 		goto out_unlock;
 	}
 
@@ -496,7 +497,7 @@ int pgtable_repl_enable(struct mm_struct *mm, nodemask_t nodes)
 
 	WRITE_ONCE(base_page->pt_replica, NULL);
 
-	ret = alloc_pgd_replicas(base_page, mm, nodes, pgd_pages, &count);
+	ret = alloc_pgd_replicas(base_page, mm, pgd_pages, &count);
 	if (ret)
 		goto fail_cleanup;
 
@@ -794,7 +795,6 @@ int mitosis_inherit_sysctl_handler(struct ctl_table *table, int write,
 
 struct mitosis_enable_work {
 	struct callback_head twork;
-	nodemask_t nodes;
 	int result;
 	struct completion done;
 };
@@ -804,23 +804,22 @@ static void mitosis_enable_task_work_fn(struct callback_head *head)
 	struct mitosis_enable_work *work =
 		container_of(head, struct mitosis_enable_work, twork);
 
-	work->result = pgtable_repl_enable(current->mm, work->nodes);
+	work->result = pgtable_repl_enable(current->mm);
 	complete(&work->done);
 }
 
-int pgtable_repl_enable_external(struct task_struct *target, nodemask_t nodes)
+int pgtable_repl_enable_external(struct task_struct *target)
 {
 	struct mitosis_enable_work work;
 	int ret;
 
 	if (target == current)
-		return pgtable_repl_enable(current->mm, nodes);
+		return pgtable_repl_enable(current->mm);
 
 	if (!target->mm)
 		return -EINVAL;
 
 	init_completion(&work.done);
-	work.nodes = nodes;
 	work.result = -EINVAL;
 	init_task_work(&work.twork, mitosis_enable_task_work_fn);
 

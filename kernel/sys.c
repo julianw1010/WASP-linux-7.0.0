@@ -2912,15 +2912,11 @@ SYSCALL_DEFINE5(prctl, int, option, unsigned long, arg2, unsigned long, arg3,
 		break;
 	case PR_SET_PGTABLE_REPL:
 	{
-		nodemask_t nodes;
 		struct mm_struct *mm = NULL;
 		struct task_struct *task = NULL;
 		pid_t target_pid = (pid_t)arg3;
 		bool is_external = (target_pid != 0);
 		int ret;
-		int node;
-		int valid_nodes = 0;
-		int max_node = min(NUMA_NODE_COUNT, (int)BITS_PER_LONG);
 
 		if (!is_external && current->pid == 1) {
 			error = -EINVAL;
@@ -2981,40 +2977,15 @@ SYSCALL_DEFINE5(prctl, int, option, unsigned long, arg2, unsigned long, arg3,
 			goto out_put_mm;
 		}
 
-		if (arg2 == 1) {
-			nodes = node_online_map;
-		} else {
-			nodes_clear(nodes);
-			for (node = 0; node < max_node; node++) {
-				if (arg2 & (1UL << node)) {
-					if (!node_online(node)) {
-						error = -EINVAL;
-						goto out_put_mm;
-					}
-					node_set(node, nodes);
-					valid_nodes++;
-				}
-			}
-			if (valid_nodes < 2) {
-				error = -EINVAL;
-				goto out_put_mm;
-			}
-		}
-
-		if (mm->repl_pgd_enabled && nodes_equal(mm->repl_pgd_nodes, nodes)) {
+		if (mm->repl_pgd_enabled) {
 			error = 0;
 			goto out_put_mm;
 		}
 
-		if (mm->repl_pgd_enabled) {
-			error = -EALREADY;
-			goto out_put_mm;
-		}
-
 		if (is_external) {
-			ret = pgtable_repl_enable_external(task, nodes);
+			ret = pgtable_repl_enable_external(task);
 		} else {
-			ret = pgtable_repl_enable(mm, nodes);
+			ret = pgtable_repl_enable(mm);
 		}
 
 		if (ret) {
@@ -3032,19 +3003,10 @@ SYSCALL_DEFINE5(prctl, int, option, unsigned long, arg2, unsigned long, arg3,
 	}
 	case PR_GET_PGTABLE_REPL:
 	{
-		unsigned long mask = 0;
-		int node;
-		int max_node = min(NUMA_NODE_COUNT, (int)BITS_PER_LONG);
-
-		if (current->mm && current->mm->repl_pgd_enabled) {
-			for_each_node_mask(node, current->mm->repl_pgd_nodes) {
-				if (node < max_node)
-					mask |= (1UL << node);
-			}
-			error = (long)mask;
-		} else {
+		if (current->mm && current->mm->repl_pgd_enabled)
+			error = 1;
+		else
 			error = 0;
-		}
 		break;
 	}
 	case PR_SET_PGTABLE_CACHE_ONLY:
