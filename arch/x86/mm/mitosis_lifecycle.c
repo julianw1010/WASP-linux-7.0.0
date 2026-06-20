@@ -75,51 +75,6 @@ struct page *get_replica_for_node(struct page *base, int target_node)
     return NULL;
 }
 
-static bool replicate_and_link_page(struct page *page, struct mm_struct *mm,
-                                    int (*alloc_fn)(struct page *, struct mm_struct *, struct page **, int *),
-                                    const char *level_name)
-{
-    struct page *pages[NUMA_NODE_COUNT];
-    int count = 0;
-    void *src;
-    int i, ret;
-
-    if (!page || !mm || !alloc_fn || !mm->repl_in_progress)
-        return false;
-
-    if (READ_ONCE(page->pt_replica))
-        return true;
-
-    ret = alloc_fn(page, mm, pages, &count);
-    if (ret != 0 || count < 2)
-        return false;
-
-    src = page_address(page);
-
-    for (i = 1; i < count; i++) {
-        unsigned long *entry;
-        int j;
-
-        memcpy(page_address(pages[i]), src, PAGE_SIZE);
-
-        entry = (unsigned long *)page_address(pages[i]);
-        for (j = 0; j < PAGE_SIZE / sizeof(unsigned long); j++) {
-            if (entry[j] & _PAGE_PRESENT)
-                entry[j] &= ~_PAGE_ACCESSED;
-        }
-    }
-
-    smp_wmb();
-
-    BUG_ON(!link_page_replicas(pages, count));
-
-    smp_mb();
-
-    mitosis_verify_chain_integrity(page, mm, -1);
-
-    return true;
-}
-
 static void replicate_existing_pagetables_phase1(struct mm_struct *mm)
 {
     pgd_t *pgd;
@@ -145,7 +100,33 @@ static void replicate_existing_pagetables_phase1(struct mm_struct *mm)
             unsigned long child_phys = pgd_val(pgdval) & PTE_PFN_MASK;
             if (child_phys) {
                 struct page *child_page = pfn_to_page(child_phys >> PAGE_SHIFT);
-                replicate_and_link_page(child_page, mm, alloc_p4d_replicas, "p4d");
+
+                if (mm->repl_in_progress && !READ_ONCE(child_page->pt_replica)) {
+                    struct page *pages[NUMA_NODE_COUNT];
+                    int count = 0;
+                    int i, ret;
+                    void *src;
+
+                    ret = alloc_p4d_replicas(child_page, mm, pages, &count);
+                    if (ret == 0 && count >= 2) {
+                        src = page_address(child_page);
+                        for (i = 1; i < count; i++) {
+                            unsigned long *entry;
+                            int j;
+
+                            memcpy(page_address(pages[i]), src, PAGE_SIZE);
+                            entry = (unsigned long *)page_address(pages[i]);
+                            for (j = 0; j < PAGE_SIZE / sizeof(unsigned long); j++) {
+                                if (entry[j] & _PAGE_PRESENT)
+                                    entry[j] &= ~_PAGE_ACCESSED;
+                            }
+                        }
+                        smp_wmb();
+                        BUG_ON(!link_page_replicas(pages, count));
+                        smp_mb();
+                        mitosis_verify_chain_integrity(child_page, mm, -1);
+                    }
+                }
             }
         }
 
@@ -166,7 +147,33 @@ static void replicate_existing_pagetables_phase1(struct mm_struct *mm)
                 unsigned long pud_phys = p4d_val(p4dval) & PTE_PFN_MASK;
                 if (pud_phys) {
                     struct page *pud_page = pfn_to_page(pud_phys >> PAGE_SHIFT);
-                    replicate_and_link_page(pud_page, mm, alloc_pud_replicas, "pud");
+
+                    if (mm->repl_in_progress && !READ_ONCE(pud_page->pt_replica)) {
+                        struct page *pages[NUMA_NODE_COUNT];
+                        int count = 0;
+                        int i, ret;
+                        void *src;
+
+                        ret = alloc_pud_replicas(pud_page, mm, pages, &count);
+                        if (ret == 0 && count >= 2) {
+                            src = page_address(pud_page);
+                            for (i = 1; i < count; i++) {
+                                unsigned long *entry;
+                                int j;
+
+                                memcpy(page_address(pages[i]), src, PAGE_SIZE);
+                                entry = (unsigned long *)page_address(pages[i]);
+                                for (j = 0; j < PAGE_SIZE / sizeof(unsigned long); j++) {
+                                    if (entry[j] & _PAGE_PRESENT)
+                                        entry[j] &= ~_PAGE_ACCESSED;
+                                }
+                            }
+                            smp_wmb();
+                            BUG_ON(!link_page_replicas(pages, count));
+                            smp_mb();
+                            mitosis_verify_chain_integrity(pud_page, mm, -1);
+                        }
+                    }
                 }
             }
 
@@ -187,7 +194,33 @@ static void replicate_existing_pagetables_phase1(struct mm_struct *mm)
                     unsigned long pmd_phys = pud_val(pudval) & PTE_PFN_MASK;
                     if (pmd_phys) {
                         struct page *pmd_page = pfn_to_page(pmd_phys >> PAGE_SHIFT);
-                        replicate_and_link_page(pmd_page, mm, alloc_pmd_replicas, "pmd");
+
+                        if (mm->repl_in_progress && !READ_ONCE(pmd_page->pt_replica)) {
+                            struct page *pages[NUMA_NODE_COUNT];
+                            int count = 0;
+                            int i, ret;
+                            void *src;
+
+                            ret = alloc_pmd_replicas(pmd_page, mm, pages, &count);
+                            if (ret == 0 && count >= 2) {
+                                src = page_address(pmd_page);
+                                for (i = 1; i < count; i++) {
+                                    unsigned long *entry;
+                                    int j;
+
+                                    memcpy(page_address(pages[i]), src, PAGE_SIZE);
+                                    entry = (unsigned long *)page_address(pages[i]);
+                                    for (j = 0; j < PAGE_SIZE / sizeof(unsigned long); j++) {
+                                        if (entry[j] & _PAGE_PRESENT)
+                                            entry[j] &= ~_PAGE_ACCESSED;
+                                    }
+                                }
+                                smp_wmb();
+                                BUG_ON(!link_page_replicas(pages, count));
+                                smp_mb();
+                                mitosis_verify_chain_integrity(pmd_page, mm, -1);
+                            }
+                        }
                     }
                 }
 
@@ -207,7 +240,33 @@ static void replicate_existing_pagetables_phase1(struct mm_struct *mm)
                         unsigned long pte_phys = pmd_val(pmdval) & PTE_PFN_MASK;
                         if (pte_phys) {
                             struct page *pte_page = pfn_to_page(pte_phys >> PAGE_SHIFT);
-                            replicate_and_link_page(pte_page, mm, alloc_pte_replicas, "pte");
+
+                            if (mm->repl_in_progress && !READ_ONCE(pte_page->pt_replica)) {
+                                struct page *pages[NUMA_NODE_COUNT];
+                                int count = 0;
+                                int i, ret;
+                                void *src;
+
+                                ret = alloc_pte_replicas(pte_page, mm, pages, &count);
+                                if (ret == 0 && count >= 2) {
+                                    src = page_address(pte_page);
+                                    for (i = 1; i < count; i++) {
+                                        unsigned long *entry;
+                                        int j;
+
+                                        memcpy(page_address(pages[i]), src, PAGE_SIZE);
+                                        entry = (unsigned long *)page_address(pages[i]);
+                                        for (j = 0; j < PAGE_SIZE / sizeof(unsigned long); j++) {
+                                            if (entry[j] & _PAGE_PRESENT)
+                                                entry[j] &= ~_PAGE_ACCESSED;
+                                        }
+                                    }
+                                    smp_wmb();
+                                    BUG_ON(!link_page_replicas(pages, count));
+                                    smp_mb();
+                                    mitosis_verify_chain_integrity(pte_page, mm, -1);
+                                }
+                            }
                         }
                     }
                 }
@@ -383,16 +442,6 @@ static void replicate_existing_pagetables_phase2(struct mm_struct *mm)
     smp_mb();
 }
 
-static void replicate_existing_pagetables(struct mm_struct *mm)
-{
-    if (!mm || !mm->repl_in_progress)
-        return;
-
-    replicate_existing_pagetables_phase1(mm);
-    replicate_existing_pagetables_phase2(mm);
-    smp_mb();
-}
-
 int pgtable_repl_enable(struct mm_struct *mm, nodemask_t nodes)
 {
     struct page *pgd_pages[NUMA_NODE_COUNT];
@@ -477,7 +526,8 @@ int pgtable_repl_enable(struct mm_struct *mm, nodemask_t nodes)
     smp_store_release(&mm->repl_pgd_enabled, true);
     smp_mb();
 
-    replicate_existing_pagetables(mm);
+    replicate_existing_pagetables_phase1(mm);
+    replicate_existing_pagetables_phase2(mm);
 
     smp_mb();
     smp_store_release(&mm->repl_in_progress, false);
@@ -543,13 +593,59 @@ static void switch_cr3_ipi(void *info)
     }
 }
 
-static void free_all_replicas_via_chains(struct mm_struct *mm)
+void pgtable_repl_disable(struct mm_struct *mm)
 {
+    unsigned long flags;
+    int original_node;
+    struct cr3_switch_info switch_info;
+    struct page *primary_pgd_page;
+    int alloc_order;
+    int node;
     pgd_t *pgd;
     int pgd_idx, p4d_idx, pud_idx, pmd_idx;
 
-    if (!mm)
+    if (!mm || mm == &init_mm)
         return;
+
+    mutex_lock(&global_repl_mutex);
+
+    if (!mm->repl_pgd_enabled && nodes_empty(mm->repl_pgd_nodes)) {
+        mutex_unlock(&global_repl_mutex);
+        return;
+    }
+
+    mutex_lock(&mm->repl_mutex);
+
+    if (!mm->original_pgd)
+        mm->original_pgd = mm->pgd;
+
+    original_node = page_to_nid(virt_to_page(mm->original_pgd));
+
+    smp_store_release(&mm->repl_pgd_enabled, false);
+    smp_mb();
+
+    WRITE_ONCE(mm->pgd, mm->original_pgd);
+    smp_mb();
+
+    switch_info.mm = mm;
+    switch_info.original_pgd = mm->original_pgd;
+    switch_info.initiating_cpu = smp_processor_id();
+
+    local_irq_save(flags);
+    if (current->mm == mm || current->active_mm == mm) {
+        unsigned long current_cr3_pa = __read_cr3() & PAGE_MASK;
+        unsigned long original_pgd_pa = __pa(mm->original_pgd);
+        if (current_cr3_pa != original_pgd_pa) {
+            native_write_cr3(original_pgd_pa | (__read_cr3() & ~PAGE_MASK));
+            __flush_tlb_all();
+        }
+    }
+    local_irq_restore(flags);
+
+    on_each_cpu_mask(mm_cpumask(mm), switch_cr3_ipi, &switch_info, 1);
+
+    smp_mb();
+    synchronize_rcu();
 
     pgd = mm->pgd;
 
@@ -614,107 +710,45 @@ static void free_all_replicas_via_chains(struct mm_struct *mm)
     }
 
     smp_mb();
-}
 
-static void free_pgd_replicas(struct mm_struct *mm, int keep_node)
-{
-	struct page *primary_pgd_page;
-	int node;
-	int alloc_order = mitosis_pgd_alloc_order();
+    primary_pgd_page = virt_to_page(mm->pgd);
+    alloc_order = mitosis_pgd_alloc_order();
 
-	if (!mm || !mm->pgd)
-		return;
+    WRITE_ONCE(primary_pgd_page->pt_replica, NULL);
+    smp_wmb();
 
-	primary_pgd_page = virt_to_page(mm->pgd);
-	WRITE_ONCE(primary_pgd_page->pt_replica, NULL);
-	smp_wmb();
+    for_each_node_mask(node, mm->repl_pgd_nodes) {
+        pgd_t *replica_pgd;
+        struct page *replica_page;
+        bool from_cache;
 
-	for_each_node_mask(node, mm->repl_pgd_nodes) {
-		pgd_t *replica_pgd;
-		struct page *replica_page;
-		bool from_cache;
+        if (node == original_node)
+            continue;
 
-		if (node == keep_node)
-			continue;
+        replica_pgd = mm->pgd_replicas[node];
+        if (!replica_pgd)
+            continue;
 
-		replica_pgd = mm->pgd_replicas[node];
-		if (!replica_pgd)
-			continue;
+        replica_page = virt_to_page(replica_pgd);
+        from_cache = PageMitosisFromCache(replica_page);
+        WRITE_ONCE(replica_page->pt_replica, NULL);
 
-		replica_page = virt_to_page(replica_pgd);
-		from_cache = PageMitosisFromCache(replica_page);
-		WRITE_ONCE(replica_page->pt_replica, NULL);
+        replica_page->pt_owner_mm = NULL;
 
-
-		replica_page->pt_owner_mm = NULL;
-
-		if (alloc_order == 0 && from_cache) {
-			ClearPageMitosisFromCache(replica_page);
-			replica_page->pt_replica = NULL;
-			if (mitosis_cache_push(replica_page, node, MITOSIS_CACHE_PGD)) {
-				mm->pgd_replicas[node] = NULL;
-				continue;
-			}
-		}
-
-		ClearPageMitosisFromCache(replica_page);
-		__free_pages(replica_page, alloc_order);
-
-		mm->pgd_replicas[node] = NULL;
-	}
-}
-
-void pgtable_repl_disable(struct mm_struct *mm)
-{
-    unsigned long flags;
-    int original_node;
-    struct cr3_switch_info switch_info;
-
-    if (!mm || mm == &init_mm)
-        return;
-
-    mutex_lock(&global_repl_mutex);
-
-    if (!mm->repl_pgd_enabled && nodes_empty(mm->repl_pgd_nodes)) {
-        mutex_unlock(&global_repl_mutex);
-        return;
-    }
-
-    mutex_lock(&mm->repl_mutex);
-
-    if (!mm->original_pgd)
-        mm->original_pgd = mm->pgd;
-
-    original_node = page_to_nid(virt_to_page(mm->original_pgd));
-
-    smp_store_release(&mm->repl_pgd_enabled, false);
-    smp_mb();
-
-    WRITE_ONCE(mm->pgd, mm->original_pgd);
-    smp_mb();
-
-    switch_info.mm = mm;
-    switch_info.original_pgd = mm->original_pgd;
-    switch_info.initiating_cpu = smp_processor_id();
-
-    local_irq_save(flags);
-    if (current->mm == mm || current->active_mm == mm) {
-        unsigned long current_cr3_pa = __read_cr3() & PAGE_MASK;
-        unsigned long original_pgd_pa = __pa(mm->original_pgd);
-        if (current_cr3_pa != original_pgd_pa) {
-            native_write_cr3(original_pgd_pa | (__read_cr3() & ~PAGE_MASK));
-            __flush_tlb_all();
+        if (alloc_order == 0 && from_cache) {
+            ClearPageMitosisFromCache(replica_page);
+            replica_page->pt_replica = NULL;
+            if (mitosis_cache_push(replica_page, node, MITOSIS_CACHE_PGD)) {
+                mm->pgd_replicas[node] = NULL;
+                continue;
+            }
         }
+
+        ClearPageMitosisFromCache(replica_page);
+        __free_pages(replica_page, alloc_order);
+
+        mm->pgd_replicas[node] = NULL;
     }
-    local_irq_restore(flags);
-
-    on_each_cpu_mask(mm_cpumask(mm), switch_cr3_ipi, &switch_info, 1);
-
-    smp_mb();
-    synchronize_rcu();
-
-    free_all_replicas_via_chains(mm);
-    free_pgd_replicas(mm, original_node);
 
     memset(mm->pgd_replicas, 0, sizeof(mm->pgd_replicas));
     nodes_clear(mm->repl_pgd_nodes);

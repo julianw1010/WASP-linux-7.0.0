@@ -9,69 +9,6 @@
 
 #include <asm/pgtable_repl.h>
 
-static inline struct page *mitosis_alloc_primary_node(struct mm_struct *mm,
-						       gfp_t gfp, int order,
-						       int cache_level, int node)
-{
-	struct page *page;
-
-	if (order == 0) {
-		page = mitosis_cache_pop(node, cache_level);
-		if (page)
-			return page;
-	}
-
-	return alloc_pages_node(node, gfp | __GFP_THISNODE, order);
-}
-
-static inline struct page *mitosis_alloc_primary(struct mm_struct *mm,
-						  gfp_t gfp, int order,
-						  int cache_level)
-{
-	return mitosis_alloc_primary_node(mm, gfp, order, cache_level,
-					  numa_node_id());
-}
-
-static inline int mitosis_pgtable_node(void *table)
-{
-	return page_to_nid(virt_to_page(table));
-}
-
-static inline void mitosis_ctor_fail(struct page *page, struct ptdesc *ptdesc,
-				      int cache_level)
-{
-	if (PageMitosisFromCache(page)) {
-		page->pt_replica = NULL;
-		mitosis_cache_push(page, page_to_nid(page), cache_level);
-	} else {
-		pagetable_free(ptdesc);
-	}
-}
-
-static inline bool mitosis_active(struct mm_struct *mm)
-{
-	return mm && mm != &init_mm &&
-	       (smp_load_acquire(&mm->repl_pgd_enabled) ||
-		READ_ONCE(mm->cache_only_mode));
-}
-
-static inline bool mitosis_free_or_cache(struct page *page, int cache_level)
-{
-	int nid = page_to_nid(page);
-	bool from_cache = PageMitosisFromCache(page);
-
-	page->pt_owner_mm = NULL;
-	ClearPageMitosisFromCache(page);
-
-	if (from_cache) {
-		page->pt_replica = NULL;
-		if (mitosis_cache_push(page, nid, cache_level))
-			return true;
-	}
-
-	return false;
-}
-
 /**
  * __pte_alloc_one_kernel - allocate memory for a PTE-level kernel page table
  * @mm: the mm_struct of the current context
@@ -138,16 +75,24 @@ static inline void pte_free_kernel(struct mm_struct *mm, pte_t *pte)
 static inline pgtable_t __pte_alloc_one_noprof(struct mm_struct *mm, gfp_t gfp,
 					       pmd_t *pmd)
 {
-	int node = mitosis_pgtable_node(pmd);
+	int node = page_to_nid(virt_to_page(pmd));
 	struct ptdesc *ptdesc;
 	struct page *page;
 
-	page = mitosis_alloc_primary_node(mm, gfp, 0, MITOSIS_CACHE_PTE, node);
+	page = mitosis_cache_pop(node, MITOSIS_CACHE_PTE);
+	if (!page)
+		page = alloc_pages_node(node, gfp | __GFP_THISNODE, 0);
 	if (!page)
 		return NULL;
+
 	ptdesc = page_ptdesc(page);
 	if (!pagetable_pte_ctor(mm, ptdesc)) {
-		mitosis_ctor_fail(page, ptdesc, MITOSIS_CACHE_PTE);
+		if (PageMitosisFromCache(page)) {
+			page->pt_replica = NULL;
+			mitosis_cache_push(page, page_to_nid(page), MITOSIS_CACHE_PTE);
+		} else {
+			pagetable_free(ptdesc);
+		}
 		return NULL;
 	}
 
@@ -185,16 +130,23 @@ static inline pgtable_t pte_alloc_one_noprof(struct mm_struct *mm, pmd_t *pmd)
 static inline void pte_free(struct mm_struct *mm, struct page *pte_page)
 {
 	struct ptdesc *ptdesc = page_ptdesc(pte_page);
+	int nid = page_to_nid(pte_page);
+	bool from_cache = PageMitosisFromCache(pte_page);
 
 	pgtable_repl_free_pte_replicas(mm, pte_page);
 	pagetable_dtor(ptdesc);
 
-	if (mitosis_free_or_cache(pte_page, MITOSIS_CACHE_PTE))
-		return;
+	pte_page->pt_owner_mm = NULL;
+	ClearPageMitosisFromCache(pte_page);
+
+	if (from_cache) {
+		pte_page->pt_replica = NULL;
+		if (mitosis_cache_push(pte_page, nid, MITOSIS_CACHE_PTE))
+			return;
+	}
 
 	pagetable_free(ptdesc);
 }
-
 
 #if CONFIG_PGTABLE_LEVELS > 2
 
@@ -216,6 +168,7 @@ static inline pmd_t *pmd_alloc_one_noprof(struct mm_struct *mm, unsigned long ad
 	gfp_t gfp = (mm == &init_mm) ? GFP_PGTABLE_KERNEL : GFP_PGTABLE_USER;
 	struct ptdesc *ptdesc;
 	struct page *page;
+	int node;
 
 	if (mm == &init_mm) {
 		ptdesc = pagetable_alloc_noprof(gfp, 0);
@@ -229,13 +182,21 @@ static inline pmd_t *pmd_alloc_one_noprof(struct mm_struct *mm, unsigned long ad
 		return ptdesc_address(ptdesc);
 	}
 
-	page = mitosis_alloc_primary_node(mm, gfp, 0, MITOSIS_CACHE_PMD,
-					  mitosis_pgtable_node(pud));
+	node = page_to_nid(virt_to_page(pud));
+	page = mitosis_cache_pop(node, MITOSIS_CACHE_PMD);
+	if (!page)
+		page = alloc_pages_node(node, gfp | __GFP_THISNODE, 0);
 	if (!page)
 		return NULL;
+
 	ptdesc = page_ptdesc(page);
 	if (!pagetable_pmd_ctor(mm, ptdesc)) {
-		mitosis_ctor_fail(page, ptdesc, MITOSIS_CACHE_PMD);
+		if (PageMitosisFromCache(page)) {
+			page->pt_replica = NULL;
+			mitosis_cache_push(page, page_to_nid(page), MITOSIS_CACHE_PMD);
+		} else {
+			pagetable_free(ptdesc);
+		}
 		return NULL;
 	}
 
@@ -250,12 +211,20 @@ static inline void pmd_free(struct mm_struct *mm, pmd_t *pmd)
 {
 	struct ptdesc *ptdesc = virt_to_ptdesc(pmd);
 	struct page *page = ptdesc_page(ptdesc);
+	int nid = page_to_nid(page);
+	bool from_cache = PageMitosisFromCache(page);
 
 	BUG_ON((unsigned long)pmd & (PAGE_SIZE-1));
 	pagetable_dtor(ptdesc);
 
-	if (mitosis_free_or_cache(page, MITOSIS_CACHE_PMD))
-		return;
+	page->pt_owner_mm = NULL;
+	ClearPageMitosisFromCache(page);
+
+	if (from_cache) {
+		page->pt_replica = NULL;
+		if (mitosis_cache_push(page, nid, MITOSIS_CACHE_PMD))
+			return;
+	}
 
 	pagetable_free(ptdesc);
 }
@@ -271,6 +240,7 @@ static inline pud_t *__pud_alloc_one_noprof(struct mm_struct *mm, unsigned long 
 	gfp_t gfp = (mm == &init_mm) ? GFP_PGTABLE_KERNEL : GFP_PGTABLE_USER;
 	struct ptdesc *ptdesc;
 	struct page *page;
+	int node;
 
 	if (mm == &init_mm) {
 		ptdesc = pagetable_alloc_noprof(gfp, 0);
@@ -281,12 +251,14 @@ static inline pud_t *__pud_alloc_one_noprof(struct mm_struct *mm, unsigned long 
 		return ptdesc_address(ptdesc);
 	}
 
-	page = mitosis_alloc_primary_node(mm, gfp | __GFP_ZERO, 0, MITOSIS_CACHE_PUD,
-					  mitosis_pgtable_node(p4d));
+	node = page_to_nid(virt_to_page(p4d));
+	page = mitosis_cache_pop(node, MITOSIS_CACHE_PUD);
+	if (!page)
+		page = alloc_pages_node(node, gfp | __GFP_ZERO | __GFP_THISNODE, 0);
 	if (!page)
 		return NULL;
-	ptdesc = page_ptdesc(page);
 
+	ptdesc = page_ptdesc(page);
 	pagetable_pud_ctor(ptdesc);
 	page->pt_owner_mm = mm;
 	return ptdesc_address(ptdesc);
@@ -315,12 +287,20 @@ static inline void __pud_free(struct mm_struct *mm, pud_t *pud)
 {
 	struct ptdesc *ptdesc = virt_to_ptdesc(pud);
 	struct page *page = ptdesc_page(ptdesc);
+	int nid = page_to_nid(page);
+	bool from_cache = PageMitosisFromCache(page);
 
 	BUG_ON((unsigned long)pud & (PAGE_SIZE-1));
 	pagetable_dtor(ptdesc);
 
-	if (mitosis_free_or_cache(page, MITOSIS_CACHE_PUD))
-		return;
+	page->pt_owner_mm = NULL;
+	ClearPageMitosisFromCache(page);
+
+	if (from_cache) {
+		page->pt_replica = NULL;
+		if (mitosis_cache_push(page, nid, MITOSIS_CACHE_PUD))
+			return;
+	}
 
 	pagetable_free(ptdesc);
 }
@@ -342,6 +322,7 @@ static inline p4d_t *__p4d_alloc_one_noprof(struct mm_struct *mm, unsigned long 
 	gfp_t gfp = (mm == &init_mm) ? GFP_PGTABLE_KERNEL : GFP_PGTABLE_USER;
 	struct ptdesc *ptdesc;
 	struct page *page;
+	int node;
 
 	if (mm == &init_mm) {
 		ptdesc = pagetable_alloc_noprof(gfp, 0);
@@ -352,12 +333,14 @@ static inline p4d_t *__p4d_alloc_one_noprof(struct mm_struct *mm, unsigned long 
 		return ptdesc_address(ptdesc);
 	}
 
-	page = mitosis_alloc_primary_node(mm, gfp | __GFP_ZERO, 0, MITOSIS_CACHE_P4D,
-					  mitosis_pgtable_node(pgd));
+	node = page_to_nid(virt_to_page(pgd));
+	page = mitosis_cache_pop(node, MITOSIS_CACHE_P4D);
+	if (!page)
+		page = alloc_pages_node(node, gfp | __GFP_ZERO | __GFP_THISNODE, 0);
 	if (!page)
 		return NULL;
-	ptdesc = page_ptdesc(page);
 
+	ptdesc = page_ptdesc(page);
 	pagetable_p4d_ctor(ptdesc);
 	page->pt_owner_mm = mm;
 	return ptdesc_address(ptdesc);
@@ -377,12 +360,20 @@ static inline void __p4d_free(struct mm_struct *mm, p4d_t *p4d)
 {
 	struct ptdesc *ptdesc = virt_to_ptdesc(p4d);
 	struct page *page = ptdesc_page(ptdesc);
+	int nid = page_to_nid(page);
+	bool from_cache = PageMitosisFromCache(page);
 
 	BUG_ON((unsigned long)p4d & (PAGE_SIZE-1));
 	pagetable_dtor(ptdesc);
 
-	if (mitosis_free_or_cache(page, MITOSIS_CACHE_P4D))
-		return;
+	page->pt_owner_mm = NULL;
+	ClearPageMitosisFromCache(page);
+
+	if (from_cache) {
+		page->pt_replica = NULL;
+		if (mitosis_cache_push(page, nid, MITOSIS_CACHE_P4D))
+			return;
+	}
 
 	pagetable_free(ptdesc);
 }

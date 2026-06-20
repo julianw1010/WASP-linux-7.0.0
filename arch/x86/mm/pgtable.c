@@ -25,14 +25,21 @@ void ___pte_free_tlb(struct mmu_gather *tlb, struct page *pte)
 {
 	struct ptdesc *ptdesc = page_ptdesc(pte);
 	bool from_cache = PageMitosisFromCache(pte);
+	int nid = page_to_nid(pte);
 
 	paravirt_release_pte(page_to_pfn(pte));
 
 	if (from_cache)
 		pagetable_dtor(ptdesc);
 
-	if (mitosis_free_or_cache(pte, MITOSIS_CACHE_PTE))
-		return;
+	pte->pt_owner_mm = NULL;
+	ClearPageMitosisFromCache(pte);
+
+	if (from_cache) {
+		pte->pt_replica = NULL;
+		if (mitosis_cache_push(pte, nid, MITOSIS_CACHE_PTE))
+			return;
+	}
 
 	if (from_cache)
 		pagetable_free(ptdesc);
@@ -46,6 +53,7 @@ void ___pmd_free_tlb(struct mmu_gather *tlb, pmd_t *pmd)
 	struct ptdesc *ptdesc = virt_to_ptdesc(pmd);
 	struct page *page = ptdesc_page(ptdesc);
 	bool from_cache = PageMitosisFromCache(page);
+	int nid = page_to_nid(page);
 
 	paravirt_release_pmd(__pa(pmd) >> PAGE_SHIFT);
 	/*
@@ -58,8 +66,14 @@ void ___pmd_free_tlb(struct mmu_gather *tlb, pmd_t *pmd)
 	if (from_cache)
 		pagetable_dtor(ptdesc);
 
-	if (mitosis_free_or_cache(page, MITOSIS_CACHE_PMD))
-		return;
+	page->pt_owner_mm = NULL;
+	ClearPageMitosisFromCache(page);
+
+	if (from_cache) {
+		page->pt_replica = NULL;
+		if (mitosis_cache_push(page, nid, MITOSIS_CACHE_PMD))
+			return;
+	}
 
 	if (from_cache)
 		pagetable_free(ptdesc);
@@ -73,14 +87,21 @@ void ___pud_free_tlb(struct mmu_gather *tlb, pud_t *pud)
 	struct ptdesc *ptdesc = virt_to_ptdesc(pud);
 	struct page *page = ptdesc_page(ptdesc);
 	bool from_cache = PageMitosisFromCache(page);
+	int nid = page_to_nid(page);
 
 	paravirt_release_pud(__pa(pud) >> PAGE_SHIFT);
 
 	if (from_cache)
 		pagetable_dtor(ptdesc);
 
-	if (mitosis_free_or_cache(page, MITOSIS_CACHE_PUD))
-		return;
+	page->pt_owner_mm = NULL;
+	ClearPageMitosisFromCache(page);
+
+	if (from_cache) {
+		page->pt_replica = NULL;
+		if (mitosis_cache_push(page, nid, MITOSIS_CACHE_PUD))
+			return;
+	}
 
 	if (from_cache)
 		pagetable_free(ptdesc);
@@ -94,14 +115,21 @@ void ___p4d_free_tlb(struct mmu_gather *tlb, p4d_t *p4d)
 	struct ptdesc *ptdesc = virt_to_ptdesc(p4d);
 	struct page *page = ptdesc_page(ptdesc);
 	bool from_cache = PageMitosisFromCache(page);
+	int nid = page_to_nid(page);
 
 	paravirt_release_p4d(__pa(p4d) >> PAGE_SHIFT);
 
 	if (from_cache)
 		pagetable_dtor(ptdesc);
 
-	if (mitosis_free_or_cache(page, MITOSIS_CACHE_P4D))
-		return;
+	page->pt_owner_mm = NULL;
+	ClearPageMitosisFromCache(page);
+
+	if (from_cache) {
+		page->pt_replica = NULL;
+		if (mitosis_cache_push(page, nid, MITOSIS_CACHE_P4D))
+			return;
+	}
 
 	if (from_cache)
 		pagetable_free(ptdesc);
@@ -372,9 +400,18 @@ static inline pgd_t *_pgd_alloc(struct mm_struct *mm)
 	struct page *page;
 	pgd_t *pgd;
 
-	if (mitosis_active(mm)) {
-		page = mitosis_alloc_primary(mm, GFP_PGTABLE_USER, order,
-					      MITOSIS_CACHE_PGD);
+	if (mm && mm != &init_mm &&
+	    (smp_load_acquire(&mm->repl_pgd_enabled) ||
+	     READ_ONCE(mm->cache_only_mode))) {
+		int node = numa_node_id();
+
+		page = NULL;
+		if (order == 0)
+			page = mitosis_cache_pop(node, MITOSIS_CACHE_PGD);
+		if (!page)
+			page = alloc_pages_node(node,
+						GFP_PGTABLE_USER | __GFP_THISNODE,
+						order);
 		if (!page)
 			return NULL;
 		pgd = (pgd_t *)page_address(page);
@@ -395,8 +432,17 @@ static inline void _pgd_free(struct mm_struct *mm, pgd_t *pgd)
 	int order = pgd_allocation_order();
 
 	if (order == 0) {
-		if (mitosis_free_or_cache(page, MITOSIS_CACHE_PGD))
-			return;
+		int nid = page_to_nid(page);
+		bool from_cache = PageMitosisFromCache(page);
+
+		page->pt_owner_mm = NULL;
+		ClearPageMitosisFromCache(page);
+
+		if (from_cache) {
+			page->pt_replica = NULL;
+			if (mitosis_cache_push(page, nid, MITOSIS_CACHE_PGD))
+				return;
+		}
 	} else {
 		page->pt_owner_mm = NULL;
 		ClearPageMitosisFromCache(page);
