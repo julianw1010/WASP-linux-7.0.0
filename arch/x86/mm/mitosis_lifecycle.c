@@ -462,7 +462,6 @@ int pgtable_repl_enable(struct mm_struct *mm, nodemask_t nodes)
 	struct page *base_page;
 	pgd_t *base_pgd;
 	int node, count = 0, base_node, ret = 0, i;
-	struct task_struct *t;
 
 	if (!mm || mm == &init_mm || nodes_empty(nodes) || nodes_weight(nodes) < 2)
 		return -EINVAL;
@@ -530,13 +529,6 @@ int pgtable_repl_enable(struct mm_struct *mm, nodemask_t nodes)
 
 	mmap_write_lock(mm);
 
-	rcu_read_lock();
-	for_each_thread(current, t) {
-		if (t != current)
-			send_sig(SIGSTOP, t, 1);
-	}
-	rcu_read_unlock();
-
 	smp_store_release(&mm->repl_in_progress, true);
 	smp_store_release(&mm->repl_pgd_enabled, true);
 	smp_mb();
@@ -548,13 +540,6 @@ int pgtable_repl_enable(struct mm_struct *mm, nodemask_t nodes)
 	smp_store_release(&mm->repl_in_progress, false);
 
 	mmap_write_unlock(mm);
-
-	rcu_read_lock();
-	for_each_thread(current, t) {
-		if (t != current)
-			send_sig(SIGCONT, t, 1);
-	}
-	rcu_read_unlock();
 
 	pgtable_repl_force_steering_switch(mm, NULL);
 
