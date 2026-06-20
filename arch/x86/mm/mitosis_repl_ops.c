@@ -26,16 +26,14 @@ void pgtable_repl_set_pte(pte_t *ptep, pte_t pteval)
 
 	offset = ((unsigned long)ptep) & ~PAGE_MASK;
 	start_page = pte_page;
-	native_set_pte(ptep, pteval);
+	cur_page = pte_page;
 
-	cur_page = pte_page->pt_replica;
-
-	while (cur_page && cur_page != start_page) {
+	do {
 		pte_t *replica_entry = (pte_t *)(page_address(cur_page) + offset);
 
 		WRITE_ONCE(*replica_entry, pteval);
 		cur_page = cur_page->pt_replica;
-	}
+	} while (cur_page && cur_page != start_page);
 
 	mitosis_verify_after_set_pte(ptep, pteval);
 
@@ -396,19 +394,17 @@ pte_t pgtable_repl_get_pte(pte_t *ptep)
 	    !pte_page->pt_replica)
 		return __pte(pte_val(*ptep));
 
-	val = pte_val(*ptep);
-
+	val = 0;
 	offset = ((unsigned long)ptep) & ~PAGE_MASK;
 	start_page = pte_page;
+	cur_page = pte_page;
 
-	cur_page = pte_page->pt_replica;
+	do {
+		pte_t *replica_entry = (pte_t *)(page_address(cur_page) + offset);
 
-	while (cur_page && cur_page != start_page) {
-		pte_t *replica_pte = (pte_t *)(page_address(cur_page) + offset);
-
-		val |= pte_val(*replica_pte);
+		val |= pte_val(*replica_entry);
 		cur_page = cur_page->pt_replica;
-	}
+	} while (cur_page && cur_page != start_page);
 
 	{
 		pte_t ret = (pte_t){ .pte = val };
@@ -561,7 +557,6 @@ pmd_t pgtable_repl_pmdp_huge_get_and_clear(struct mm_struct *mm, pmd_t *pmdp)
 	struct page *start_page;
 	unsigned long offset;
 	pmdval_t val;
-	pmdval_t flags;
 
 	if (!pmdp)
 		return __pmd(0);
@@ -575,27 +570,22 @@ pmd_t pgtable_repl_pmdp_huge_get_and_clear(struct mm_struct *mm, pmd_t *pmdp)
 	    !pmd_page->pt_replica)
 		return native_pmdp_get_and_clear(pmdp);
 
-	val = pmd_val(native_pmdp_get_and_clear(pmdp));
-	flags = pmd_flags(__pmd(val));
-
+	val = 0;
 	offset = ((unsigned long)pmdp) & ~PAGE_MASK;
 	start_page = pmd_page;
+	cur_page = pmd_page;
 
-	cur_page = pmd_page->pt_replica;
-
-	while (cur_page && cur_page != start_page) {
+	do {
 		pmd_t *replica_entry = (pmd_t *)(page_address(cur_page) + offset);
 		pmd_t old_entry = native_pmdp_get_and_clear(replica_entry);
 
-		if (pmd_present(old_entry))
-			flags |= pmd_flags(old_entry);
-
+		val |= pmd_val(old_entry);
 		cur_page = cur_page->pt_replica;
-	}
+	} while (cur_page && cur_page != start_page);
 
 	mitosis_verify_after_pmdp_huge_get_and_clear(pmdp);
 
-	return pmd_set_flags(__pmd(val), flags);
+	return __pmd(val);
 }
 
 void pgtable_repl_pmdp_set_wrprotect(struct mm_struct *mm,
@@ -623,17 +613,11 @@ void pgtable_repl_pmdp_set_wrprotect(struct mm_struct *mm,
 		return;
 	}
 
-	old_pmd = READ_ONCE(*pmdp);
-	do {
-		new_pmd = pmd_wrprotect(old_pmd);
-	} while (!try_cmpxchg((long *)pmdp, (long *)&old_pmd, *(long *)&new_pmd));
-
 	offset = ((unsigned long)pmdp) & ~PAGE_MASK;
 	start_page = pmd_page;
+	cur_page = pmd_page;
 
-	cur_page = pmd_page->pt_replica;
-
-	while (cur_page && cur_page != start_page) {
+	do {
 		pmd_t *replica_entry = (pmd_t *)(page_address(cur_page) + offset);
 
 		if (pmd_present(*replica_entry)) {
@@ -642,9 +626,8 @@ void pgtable_repl_pmdp_set_wrprotect(struct mm_struct *mm,
 				new_pmd = pmd_wrprotect(old_pmd);
 			} while (!try_cmpxchg((long *)replica_entry, (long *)&old_pmd, *(long *)&new_pmd));
 		}
-
 		cur_page = cur_page->pt_replica;
-	}
+	} while (cur_page && cur_page != start_page);
 
 	mitosis_verify_after_pmdp_set_wrprotect(pmdp);
 
@@ -691,33 +674,27 @@ pmd_t pgtable_repl_pmdp_establish(struct mm_struct *mm, pmd_t *pmdp, pmd_t pmd)
 		}
 	}
 
+	val = 0;
 	offset = ((unsigned long)pmdp) & ~PAGE_MASK;
 	start_page = pmd_page;
+	cur_page = pmd_page;
 
-	if (IS_ENABLED(CONFIG_SMP)) {
-		val = pmd_val(xchg(pmdp, pmd));
-	} else {
-		val = pmd_val(*pmdp);
-		WRITE_ONCE(*pmdp, pmd);
-	}
-
-	cur_page = pmd_page->pt_replica;
-
-	while (cur_page && cur_page != start_page) {
+	do {
 		pmd_t *replica_entry = (pmd_t *)(page_address(cur_page) + offset);
-		pmd_t old_repl;
+		pmd_t old_entry;
 
 		if (IS_ENABLED(CONFIG_SMP)) {
-			old_repl = __pmd(pmd_val(xchg(replica_entry, pmd)));
+			old_entry = xchg(replica_entry, pmd);
 		} else {
-			old_repl = *replica_entry;
+			old_entry = *replica_entry;
 			WRITE_ONCE(*replica_entry, pmd);
 		}
 
-		val |= pmd_flags(old_repl);
-
+		if (cur_page == start_page)
+			val = pmd_val(old_entry);
+		val |= pmd_flags(old_entry);
 		cur_page = cur_page->pt_replica;
-	}
+	} while (cur_page && cur_page != start_page);
 
 	mitosis_verify_after_pmdp_establish(pmdp, pmd);
 
@@ -758,28 +735,20 @@ int pgtable_repl_pmdp_test_and_clear_young(struct vm_area_struct *vma,
 		return ret;
 	}
 
-	if (pmd_young(*pmdp))
-		ret = test_and_clear_bit(_PAGE_BIT_ACCESSED,
-					 (unsigned long *)pmdp);
-
 	offset = ((unsigned long)pmdp) & ~PAGE_MASK;
 	start_page = pmd_page;
+	cur_page = pmd_page;
 
-	cur_page = pmd_page->pt_replica;
-
-	while (cur_page && cur_page != start_page) {
+	do {
 		pmd_t *replica_entry = (pmd_t *)(page_address(cur_page) + offset);
 
-		if (pmd_present(*replica_entry) && pmd_trans_huge(*replica_entry)) {
-			if (pmd_young(*replica_entry)) {
-				if (test_and_clear_bit(_PAGE_BIT_ACCESSED,
-						       (unsigned long *)replica_entry))
-					ret = 1;
-			}
+		if (pmd_present(*replica_entry) && pmd_young(*replica_entry)) {
+			if (test_and_clear_bit(_PAGE_BIT_ACCESSED,
+					       (unsigned long *)replica_entry))
+				ret = 1;
 		}
-
 		cur_page = cur_page->pt_replica;
-	}
+	} while (cur_page && cur_page != start_page);
 
 	mitosis_verify_after_pmdp_clear_young(pmdp);
 
@@ -812,25 +781,24 @@ pmd_t pgtable_repl_get_pmd(pmd_t *pmdp)
 	    !pmd_page->pt_replica)
 		return *pmdp;
 
-	val = pmd_val(*pmdp);
-
-	if (!pmd_present(__pmd(val)))
-		return __pmd(val);
-
+	val = 0;
 	offset = ((unsigned long)pmdp) & ~PAGE_MASK;
 	start_page = pmd_page;
+	cur_page = pmd_page;
 
-	cur_page = pmd_page->pt_replica;
-
-	while (cur_page && cur_page != start_page) {
+	do {
 		pmd_t *replica_entry = (pmd_t *)(page_address(cur_page) + offset);
-		pmd_t replica_val = *replica_entry;
+		pmd_t entry_val = *replica_entry;
 
-		if (pmd_present(replica_val))
-			val |= pmd_flags(replica_val);
-
+		if (cur_page == start_page) {
+			val = pmd_val(entry_val);
+			if (!pmd_present(entry_val))
+				break;
+		} else if (pmd_present(entry_val)) {
+			val |= pmd_flags(entry_val);
+		}
 		cur_page = cur_page->pt_replica;
-	}
+	} while (cur_page && cur_page != start_page);
 
 	{
 		pmd_t ret = __pmd(val);

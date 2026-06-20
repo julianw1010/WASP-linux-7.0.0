@@ -54,18 +54,13 @@ struct page *get_replica_for_node(struct page *base, int target_node)
 	if (page_to_nid(base) == target_node)
 		return base;
 
-	page = base->pt_replica;
-	if (!page)
-		return NULL;
-
 	start_page = base;
+	page = base->pt_replica;
 
-	while (page != start_page) {
+	while (page && page != start_page) {
 		if (page_to_nid(page) == target_node)
 			return page;
 		page = page->pt_replica;
-		if (!page)
-			return NULL;
 	}
 
 	return NULL;

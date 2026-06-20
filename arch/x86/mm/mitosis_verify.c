@@ -26,12 +26,8 @@ void mitosis_verify_chain_integrity(struct page *primary, struct mm_struct *mm,
 	if (mm && smp_load_acquire(&mm->repl_pgd_enabled))
 		BUG_ON(primary->pt_owner_mm != mm);
 
-	while (replica != primary) {
-		int replica_nid;
-
-		BUG_ON(!replica);
-
-		replica_nid = page_to_nid(replica);
+	while (replica && replica != primary) {
+		int replica_nid = page_to_nid(replica);
 
 		BUG_ON(node_isset(replica_nid, seen_nodes));
 		node_set(replica_nid, seen_nodes);
@@ -528,7 +524,7 @@ void mitosis_verify_after_set_pte(pte_t *ptep, pte_t pteval)
 
 	offset = ((unsigned long)ptep) & ~PAGE_MASK;
 
-	while (replica != pte_page) {
+	while (replica && replica != pte_page) {
 		pte_t *replica_entry = (pte_t *)(page_address(replica) + offset);
 		pte_t replica_pte = READ_ONCE(*replica_entry);
 
@@ -541,8 +537,6 @@ void mitosis_verify_after_set_pte(pte_t *ptep, pte_t pteval)
 		}
 
 		replica = READ_ONCE(replica->pt_replica);
-		if (!replica)
-			break;
 	}
 }
 
@@ -564,7 +558,7 @@ void mitosis_verify_after_set_pmd(pmd_t *pmdp, pmd_t pmdval)
 	offset = ((unsigned long)pmdp) & ~PAGE_MASK;
 	entry_val = pmd_val(pmdval);
 
-	while (replica != parent_page) {
+	while (replica && replica != parent_page) {
 		pmd_t *replica_entry = (pmd_t *)(page_address(replica) + offset);
 		pmd_t replica_pmd = READ_ONCE(*replica_entry);
 		int replica_nid = page_to_nid(replica);
@@ -588,8 +582,6 @@ void mitosis_verify_after_set_pmd(pmd_t *pmdp, pmd_t pmdval)
 		}
 
 		replica = READ_ONCE(replica->pt_replica);
-		if (!replica)
-			break;
 	}
 }
 
@@ -609,7 +601,7 @@ void mitosis_verify_after_set_pud(pud_t *pudp, pud_t pudval)
 
 	offset = ((unsigned long)pudp) & ~PAGE_MASK;
 
-	while (replica != parent_page) {
+	while (replica && replica != parent_page) {
 		pud_t *replica_entry = (pud_t *)(page_address(replica) + offset);
 		pud_t replica_pud = READ_ONCE(*replica_entry);
 		int replica_nid = page_to_nid(replica);
@@ -629,8 +621,6 @@ void mitosis_verify_after_set_pud(pud_t *pudp, pud_t pudval)
 		}
 
 		replica = READ_ONCE(replica->pt_replica);
-		if (!replica)
-			break;
 	}
 }
 
@@ -650,7 +640,7 @@ void mitosis_verify_after_set_p4d(p4d_t *p4dp, p4d_t p4dval)
 
 	offset = ((unsigned long)p4dp) & ~PAGE_MASK;
 
-	while (replica != parent_page) {
+	while (replica && replica != parent_page) {
 		p4d_t *replica_entry = (p4d_t *)(page_address(replica) + offset);
 		p4d_t replica_p4d = READ_ONCE(*replica_entry);
 		int replica_nid = page_to_nid(replica);
@@ -670,8 +660,6 @@ void mitosis_verify_after_set_p4d(p4d_t *p4dp, p4d_t p4dval)
 		}
 
 		replica = READ_ONCE(replica->pt_replica);
-		if (!replica)
-			break;
 	}
 }
 
@@ -691,7 +679,7 @@ void mitosis_verify_after_set_pgd(pgd_t *pgdp, pgd_t pgdval)
 
 	offset = ((unsigned long)pgdp) & ~PAGE_MASK;
 
-	while (replica != parent_page) {
+	while (replica && replica != parent_page) {
 		pgd_t *replica_entry = (pgd_t *)(page_address(replica) + offset);
 		pgd_t replica_pgd = READ_ONCE(*replica_entry);
 		int replica_nid = page_to_nid(replica);
@@ -711,8 +699,6 @@ void mitosis_verify_after_set_pgd(pgd_t *pgdp, pgd_t pgdval)
 		}
 
 		replica = READ_ONCE(replica->pt_replica);
-		if (!replica)
-			break;
 	}
 }
 
@@ -796,14 +782,12 @@ void mitosis_verify_after_ptep_get_and_clear(pte_t *ptep)
 
 	BUG_ON(pte_val(READ_ONCE(*ptep)) != 0);
 
-	while (replica != pte_page) {
+	while (replica && replica != pte_page) {
 		pte_t *replica_entry = (pte_t *)(page_address(replica) + offset);
 
 		BUG_ON(pte_val(READ_ONCE(*replica_entry)) != 0);
 
 		replica = READ_ONCE(replica->pt_replica);
-		if (!replica)
-			break;
 	}
 }
 
@@ -825,15 +809,13 @@ void mitosis_verify_after_ptep_set_wrprotect(pte_t *ptep)
 
 	BUG_ON(pte_present(READ_ONCE(*ptep)) && pte_write(READ_ONCE(*ptep)));
 
-	while (replica != pte_page) {
+	while (replica && replica != pte_page) {
 		pte_t *replica_entry = (pte_t *)(page_address(replica) + offset);
 		pte_t replica_pte = READ_ONCE(*replica_entry);
 
 		BUG_ON(pte_present(replica_pte) && pte_write(replica_pte));
 
 		replica = READ_ONCE(replica->pt_replica);
-		if (!replica)
-			break;
 	}
 }
 
@@ -855,15 +837,13 @@ void mitosis_verify_after_pmdp_set_wrprotect(pmd_t *pmdp)
 
 	BUG_ON(pmd_present(READ_ONCE(*pmdp)) && pmd_write(READ_ONCE(*pmdp)));
 
-	while (replica != pmd_page) {
+	while (replica && replica != pmd_page) {
 		pmd_t *replica_entry = (pmd_t *)(page_address(replica) + offset);
 		pmd_t replica_pmd = READ_ONCE(*replica_entry);
 
 		BUG_ON(pmd_present(replica_pmd) && pmd_write(replica_pmd));
 
 		replica = READ_ONCE(replica->pt_replica);
-		if (!replica)
-			break;
 	}
 }
 
@@ -885,14 +865,12 @@ void mitosis_verify_after_pmdp_huge_get_and_clear(pmd_t *pmdp)
 
 	BUG_ON(pmd_val(READ_ONCE(*pmdp)) != 0);
 
-	while (replica != pmd_page) {
+	while (replica && replica != pmd_page) {
 		pmd_t *replica_entry = (pmd_t *)(page_address(replica) + offset);
 
 		BUG_ON(pmd_val(READ_ONCE(*replica_entry)) != 0);
 
 		replica = READ_ONCE(replica->pt_replica);
-		if (!replica)
-			break;
 	}
 }
 
@@ -912,7 +890,7 @@ void mitosis_verify_after_pmdp_establish(pmd_t *pmdp, pmd_t newpmd)
 
 	offset = ((unsigned long)pmdp) & ~PAGE_MASK;
 
-	while (replica != pmd_page) {
+	while (replica && replica != pmd_page) {
 		pmd_t *replica_entry = (pmd_t *)(page_address(replica) + offset);
 		pmd_t replica_pmd = READ_ONCE(*replica_entry);
 		int replica_nid = page_to_nid(replica);
@@ -936,8 +914,6 @@ void mitosis_verify_after_pmdp_establish(pmd_t *pmdp, pmd_t newpmd)
 		}
 
 		replica = READ_ONCE(replica->pt_replica);
-		if (!replica)
-			break;
 	}
 }
 
@@ -1001,14 +977,12 @@ void mitosis_verify_after_ptep_clear_young(pte_t *ptep)
 
 	BUG_ON(pte_young(READ_ONCE(*ptep)));
 
-	while (replica != pte_page) {
+	while (replica && replica != pte_page) {
 		pte_t *replica_entry = (pte_t *)(page_address(replica) + offset);
 
 		BUG_ON(pte_young(READ_ONCE(*replica_entry)));
 
 		replica = READ_ONCE(replica->pt_replica);
-		if (!replica)
-			break;
 	}
 }
 
@@ -1030,7 +1004,7 @@ void mitosis_verify_after_pmdp_clear_young(pmd_t *pmdp)
 
 	BUG_ON(pmd_present(READ_ONCE(*pmdp)) && pmd_young(READ_ONCE(*pmdp)));
 
-	while (replica != pmd_page) {
+	while (replica && replica != pmd_page) {
 		pmd_t *replica_entry = (pmd_t *)(page_address(replica) + offset);
 		pmd_t replica_pmd = READ_ONCE(*replica_entry);
 
@@ -1038,8 +1012,6 @@ void mitosis_verify_after_pmdp_clear_young(pmd_t *pmdp)
 		       pmd_young(replica_pmd));
 
 		replica = READ_ONCE(replica->pt_replica);
-		if (!replica)
-			break;
 	}
 }
 
@@ -1062,7 +1034,7 @@ void mitosis_verify_after_repl_alloc(struct mm_struct *mm, unsigned long pfn,
 
 	replica = READ_ONCE(primary->pt_replica);
 
-	while (replica != primary) {
+	while (replica && replica != primary) {
 		unsigned long *src_entries = (unsigned long *)page_address(primary);
 		unsigned long *dst_entries = (unsigned long *)page_address(replica);
 		int idx;
@@ -1076,7 +1048,6 @@ void mitosis_verify_after_repl_alloc(struct mm_struct *mm, unsigned long pfn,
 		}
 
 		replica = READ_ONCE(replica->pt_replica);
-		BUG_ON(!replica);
 	}
 }
 
@@ -1108,7 +1079,7 @@ void mitosis_verify_after_thp_collapse(struct mm_struct *mm, pmd_t *pmdp)
 	BUG_ON(compound_order(compound_head(huge_page)) != HPAGE_PMD_ORDER);
 
 	replica = READ_ONCE(pmd_page->pt_replica);
-	while (replica != pmd_page) {
+	while (replica && replica != pmd_page) {
 		pmd_t *replica_entry = (pmd_t *)(page_address(replica) + offset);
 		pmd_t replica_pmd = READ_ONCE(*replica_entry);
 
@@ -1116,8 +1087,6 @@ void mitosis_verify_after_thp_collapse(struct mm_struct *mm, pmd_t *pmdp)
 		BUG_ON(pmd_pfn(replica_pmd) != huge_pfn);
 
 		replica = READ_ONCE(replica->pt_replica);
-		if (!replica)
-			break;
 	}
 	mitosis_verify_chain_integrity(pmd_page, mm, MITOSIS_CACHE_PMD);
 }
