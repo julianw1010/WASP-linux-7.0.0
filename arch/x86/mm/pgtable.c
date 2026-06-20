@@ -401,8 +401,8 @@ static inline pgd_t *_pgd_alloc(struct mm_struct *mm)
 	pgd_t *pgd;
 
 	if (mm && mm != &init_mm &&
-	    (smp_load_acquire(&mm->repl_pgd_enabled) ||
-	     READ_ONCE(mm->cache_only_mode))) {
+	    (mm->repl_pgd_enabled ||
+	     mm->cache_only_mode)) {
 		int node = numa_node_id();
 
 		page = NULL;

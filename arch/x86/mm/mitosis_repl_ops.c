@@ -23,7 +23,7 @@ void pgtable_repl_set_pte(pte_t *ptep, pte_t pteval)
 		return;
 	}
 
-	if (!READ_ONCE(pte_page->pt_replica)) {
+	if (!pte_page->pt_replica) {
 		native_set_pte(ptep, pteval);
 		return;
 	}
@@ -32,16 +32,14 @@ void pgtable_repl_set_pte(pte_t *ptep, pte_t pteval)
 	start_page = pte_page;
 	native_set_pte(ptep, pteval);
 
-	cur_page = READ_ONCE(pte_page->pt_replica);
+	cur_page = pte_page->pt_replica;
 
 	while (cur_page && cur_page != start_page) {
 		pte_t *replica_entry = (pte_t *)(page_address(cur_page) + offset);
 
 		WRITE_ONCE(*replica_entry, pte_mkold(pteval));
-		cur_page = READ_ONCE(cur_page->pt_replica);
+		cur_page = cur_page->pt_replica;
 	}
-
-	smp_wmb();
 
 	mitosis_verify_after_set_pte(ptep, pteval);
 
@@ -74,7 +72,7 @@ void pgtable_repl_set_pmd(pmd_t *pmdp, pmd_t pmdval)
 		return;
 	}
 
-	if (!READ_ONCE(parent_page->pt_replica)) {
+	if (!parent_page->pt_replica) {
 		native_set_pmd(pmdp, pmdval);
 		return;
 	}
@@ -94,7 +92,7 @@ void pgtable_repl_set_pmd(pmd_t *pmdp, pmd_t pmdval)
 			child_page = pfn_to_page(child_phys >> PAGE_SHIFT);
 			if (child_page && virt_addr_valid(page_address(child_page))) {
 				child_base_page = child_page;
-				child_has_replicas = (READ_ONCE(child_base_page->pt_replica) != NULL);
+				child_has_replicas = (child_base_page->pt_replica != NULL);
 			}
 		}
 	}
@@ -129,10 +127,8 @@ void pgtable_repl_set_pmd(pmd_t *pmdp, pmd_t pmdval)
 
 		WRITE_ONCE(*replica_entry, __pmd(node_val));
 
-		cur_page = READ_ONCE(cur_page->pt_replica);
+		cur_page = cur_page->pt_replica;
 	} while (cur_page && cur_page != start_page);
-
-	smp_wmb();
 
 	mitosis_verify_after_set_pmd(pmdp, pmdval);
 
@@ -165,7 +161,7 @@ void pgtable_repl_set_pud(pud_t *pudp, pud_t pudval)
 		return;
 	}
 
-	if (!READ_ONCE(parent_page->pt_replica)) {
+	if (!parent_page->pt_replica) {
 		native_set_pud(pudp, pudval);
 		return;
 	}
@@ -177,7 +173,7 @@ void pgtable_repl_set_pud(pud_t *pudp, pud_t pudval)
 		unsigned long child_phys = entry_val & pfn_mask;
 
 		child_base_page = pfn_to_page(child_phys >> PAGE_SHIFT);
-		child_has_replicas = (READ_ONCE(child_base_page->pt_replica) != NULL);
+		child_has_replicas = (child_base_page->pt_replica != NULL);
 	}
 
 	offset = ((unsigned long)pudp) & ~PAGE_MASK;
@@ -206,10 +202,8 @@ void pgtable_repl_set_pud(pud_t *pudp, pud_t pudval)
 
 		WRITE_ONCE(*replica_entry, node_val);
 
-		cur_page = READ_ONCE(cur_page->pt_replica);
+		cur_page = cur_page->pt_replica;
 	} while (cur_page && cur_page != start_page);
-
-	smp_wmb();
 
 	mitosis_verify_after_set_pud(pudp, pudval);
 
@@ -243,7 +237,7 @@ void pgtable_repl_set_p4d(p4d_t *p4dp, p4d_t p4dval)
 		return;
 	}
 
-	if (!READ_ONCE(parent_page->pt_replica)) {
+	if (!parent_page->pt_replica) {
 		native_set_p4d(p4dp, p4dval);
 
 		if (pti_mirror) {
@@ -262,7 +256,7 @@ void pgtable_repl_set_p4d(p4d_t *p4dp, p4d_t p4dval)
 		unsigned long child_phys = entry_val & pfn_mask;
 
 		child_base_page = pfn_to_page(child_phys >> PAGE_SHIFT);
-		child_has_replicas = (READ_ONCE(child_base_page->pt_replica) != NULL);
+		child_has_replicas = (child_base_page->pt_replica != NULL);
 	}
 
 	offset = ((unsigned long)p4dp) & ~PAGE_MASK;
@@ -298,10 +292,8 @@ void pgtable_repl_set_p4d(p4d_t *p4dp, p4d_t p4dval)
 				WRITE_ONCE(*user_entry, __pgd(node_val));
 		}
 
-		cur_page = READ_ONCE(cur_page->pt_replica);
+		cur_page = cur_page->pt_replica;
 	} while (cur_page && cur_page != start_page);
-
-	smp_wmb();
 
 	mitosis_verify_after_set_p4d(p4dp, p4dval);
 
@@ -335,7 +327,7 @@ void pgtable_repl_set_pgd(pgd_t *pgdp, pgd_t pgdval)
 		return;
 	}
 
-	if (!READ_ONCE(parent_page->pt_replica)) {
+	if (!parent_page->pt_replica) {
 		native_set_pgd(pgdp, pgdval);
 
 		if (pti_mirror) {
@@ -354,7 +346,7 @@ void pgtable_repl_set_pgd(pgd_t *pgdp, pgd_t pgdval)
 		unsigned long child_phys = entry_val & pfn_mask;
 
 		child_base_page = pfn_to_page(child_phys >> PAGE_SHIFT);
-		child_has_replicas = (READ_ONCE(child_base_page->pt_replica) != NULL);
+		child_has_replicas = (child_base_page->pt_replica != NULL);
 	}
 
 	offset = ((unsigned long)pgdp) & ~PAGE_MASK;
@@ -390,10 +382,8 @@ void pgtable_repl_set_pgd(pgd_t *pgdp, pgd_t pgdval)
 				WRITE_ONCE(*user_entry, __pgd(node_val));
 		}
 
-		cur_page = READ_ONCE(cur_page->pt_replica);
+		cur_page = cur_page->pt_replica;
 	} while (cur_page && cur_page != start_page);
-
-	smp_wmb();
 
 	mitosis_verify_after_set_pgd(pgdp, pgdval);
 
@@ -422,7 +412,7 @@ pte_t pgtable_repl_get_pte(pte_t *ptep)
 	if (!pte_page || !pfn_valid(page_to_pfn(pte_page)))
 		return __pte(pte_val(*ptep));
 
-	if (!READ_ONCE(pte_page->pt_replica))
+	if (!pte_page->pt_replica)
 		return __pte(pte_val(*ptep));
 
 	val = pte_val(*ptep);
@@ -430,13 +420,13 @@ pte_t pgtable_repl_get_pte(pte_t *ptep)
 	offset = ((unsigned long)ptep) & ~PAGE_MASK;
 	start_page = pte_page;
 
-	cur_page = READ_ONCE(pte_page->pt_replica);
+	cur_page = pte_page->pt_replica;
 
 	while (cur_page && cur_page != start_page) {
 		pte_t *replica_pte = (pte_t *)(page_address(cur_page) + offset);
 
 		val |= pte_val(*replica_pte);
-		cur_page = READ_ONCE(cur_page->pt_replica);
+		cur_page = cur_page->pt_replica;
 	}
 
 	{
@@ -467,7 +457,7 @@ pte_t pgtable_repl_ptep_get_and_clear(struct mm_struct *mm, pte_t *ptep)
 	if (!pte_page || !pfn_valid(page_to_pfn(pte_page)))
 		return native_ptep_get_and_clear(ptep);
 
-	if (!READ_ONCE(pte_page->pt_replica))
+	if (!pte_page->pt_replica)
 		return native_ptep_get_and_clear(ptep);
 
 	offset = ((unsigned long)ptep) & ~PAGE_MASK;
@@ -479,10 +469,8 @@ pte_t pgtable_repl_ptep_get_and_clear(struct mm_struct *mm, pte_t *ptep)
 		pte_t old_entry = native_ptep_get_and_clear(replica_entry);
 
 		val |= pte_val(old_entry);
-		cur_page = READ_ONCE(cur_page->pt_replica);
+		cur_page = cur_page->pt_replica;
 	} while (cur_page && cur_page != start_page);
-
-	smp_wmb();
 
 	mitosis_verify_after_ptep_get_and_clear(ptep);
 
@@ -507,7 +495,7 @@ void pgtable_repl_ptep_set_wrprotect(struct mm_struct *mm,
 	if (!pte_page || !pfn_valid(page_to_pfn(pte_page)))
 		goto native_only;
 
-	if (!READ_ONCE(pte_page->pt_replica)) {
+	if (!pte_page->pt_replica) {
 		old_pte = READ_ONCE(*ptep);
 		do {
 			new_pte = pte_wrprotect(old_pte);
@@ -526,10 +514,8 @@ void pgtable_repl_ptep_set_wrprotect(struct mm_struct *mm,
 		do {
 			new_pte = pte_wrprotect(old_pte);
 		} while (!try_cmpxchg((long *)&replica_entry->pte, (long *)&old_pte, *(long *)&new_pte));
-		cur_page = READ_ONCE(cur_page->pt_replica);
+		cur_page = cur_page->pt_replica;
 	} while (cur_page && cur_page != start_page);
-
-	smp_wmb();
 
 	mitosis_verify_after_ptep_set_wrprotect(ptep);
 
@@ -560,7 +546,7 @@ int pgtable_repl_ptep_test_and_clear_young(struct vm_area_struct *vma,
 	if (!pte_page || !pfn_valid(page_to_pfn(pte_page)))
 		goto native_only;
 
-	if (!READ_ONCE(pte_page->pt_replica)) {
+	if (!pte_page->pt_replica) {
 		if (pte_young(*ptep))
 			young = test_and_clear_bit(_PAGE_BIT_ACCESSED, (unsigned long *)&ptep->pte);
 		return young;
@@ -578,10 +564,8 @@ int pgtable_repl_ptep_test_and_clear_young(struct vm_area_struct *vma,
 				young = 1;
 		}
 
-		cur_page = READ_ONCE(cur_page->pt_replica);
+		cur_page = cur_page->pt_replica;
 	} while (cur_page && cur_page != start_page);
-
-	smp_wmb();
 
 	mitosis_verify_after_ptep_clear_young(ptep);
 
@@ -611,7 +595,7 @@ pmd_t pgtable_repl_pmdp_huge_get_and_clear(struct mm_struct *mm, pmd_t *pmdp)
 	if (!pmd_page || !pfn_valid(page_to_pfn(pmd_page)))
 		return native_pmdp_get_and_clear(pmdp);
 
-	if (!READ_ONCE(pmd_page->pt_replica))
+	if (!pmd_page->pt_replica)
 		return native_pmdp_get_and_clear(pmdp);
 
 	val = pmd_val(native_pmdp_get_and_clear(pmdp));
@@ -620,7 +604,7 @@ pmd_t pgtable_repl_pmdp_huge_get_and_clear(struct mm_struct *mm, pmd_t *pmdp)
 	offset = ((unsigned long)pmdp) & ~PAGE_MASK;
 	start_page = pmd_page;
 
-	cur_page = READ_ONCE(pmd_page->pt_replica);
+	cur_page = pmd_page->pt_replica;
 
 	while (cur_page && cur_page != start_page) {
 		pmd_t *replica_entry = (pmd_t *)(page_address(cur_page) + offset);
@@ -629,10 +613,8 @@ pmd_t pgtable_repl_pmdp_huge_get_and_clear(struct mm_struct *mm, pmd_t *pmdp)
 		if (pmd_present(old_entry))
 			flags |= pmd_flags(old_entry);
 
-		cur_page = READ_ONCE(cur_page->pt_replica);
+		cur_page = cur_page->pt_replica;
 	}
-
-	smp_wmb();
 
 	mitosis_verify_after_pmdp_huge_get_and_clear(pmdp);
 
@@ -656,7 +638,7 @@ void pgtable_repl_pmdp_set_wrprotect(struct mm_struct *mm,
 	if (!pmd_page || !pfn_valid(page_to_pfn(pmd_page)))
 		goto native_only;
 
-	if (!READ_ONCE(pmd_page->pt_replica)) {
+	if (!pmd_page->pt_replica) {
 		old_pmd = READ_ONCE(*pmdp);
 		do {
 			new_pmd = pmd_wrprotect(old_pmd);
@@ -672,7 +654,7 @@ void pgtable_repl_pmdp_set_wrprotect(struct mm_struct *mm,
 	offset = ((unsigned long)pmdp) & ~PAGE_MASK;
 	start_page = pmd_page;
 
-	cur_page = READ_ONCE(pmd_page->pt_replica);
+	cur_page = pmd_page->pt_replica;
 
 	while (cur_page && cur_page != start_page) {
 		pmd_t *replica_entry = (pmd_t *)(page_address(cur_page) + offset);
@@ -684,10 +666,8 @@ void pgtable_repl_pmdp_set_wrprotect(struct mm_struct *mm,
 			} while (!try_cmpxchg((long *)replica_entry, (long *)&old_pmd, *(long *)&new_pmd));
 		}
 
-		cur_page = READ_ONCE(cur_page->pt_replica);
+		cur_page = cur_page->pt_replica;
 	}
-
-	smp_wmb();
 
 	mitosis_verify_after_pmdp_set_wrprotect(pmdp);
 
@@ -723,7 +703,7 @@ pmd_t pgtable_repl_pmdp_establish(struct mm_struct *mm, pmd_t *pmdp, pmd_t pmd)
 	if (!pmd_page || !pfn_valid(page_to_pfn(pmd_page)))
 		goto native_only;
 
-	if (!READ_ONCE(pmd_page->pt_replica)) {
+	if (!pmd_page->pt_replica) {
 		if (IS_ENABLED(CONFIG_SMP))
 			return xchg(pmdp, pmd);
 		else {
@@ -744,7 +724,7 @@ pmd_t pgtable_repl_pmdp_establish(struct mm_struct *mm, pmd_t *pmdp, pmd_t pmd)
 		WRITE_ONCE(*pmdp, pmd);
 	}
 
-	cur_page = READ_ONCE(pmd_page->pt_replica);
+	cur_page = pmd_page->pt_replica;
 
 	while (cur_page && cur_page != start_page) {
 		pmd_t *replica_entry = (pmd_t *)(page_address(cur_page) + offset);
@@ -763,10 +743,8 @@ pmd_t pgtable_repl_pmdp_establish(struct mm_struct *mm, pmd_t *pmdp, pmd_t pmd)
 
 		val |= pmd_flags(old_repl);
 
-		cur_page = READ_ONCE(cur_page->pt_replica);
+		cur_page = cur_page->pt_replica;
 	}
-
-	smp_wmb();
 
 	mitosis_verify_after_pmdp_establish(pmdp, pmd);
 
@@ -800,7 +778,7 @@ int pgtable_repl_pmdp_test_and_clear_young(struct vm_area_struct *vma,
 	if (!pmd_page || !pfn_valid(page_to_pfn(pmd_page)))
 		goto native_only;
 
-	if (!READ_ONCE(pmd_page->pt_replica)) {
+	if (!pmd_page->pt_replica) {
 		if (pmd_young(*pmdp))
 			ret = test_and_clear_bit(_PAGE_BIT_ACCESSED,
 						 (unsigned long *)pmdp);
@@ -814,7 +792,7 @@ int pgtable_repl_pmdp_test_and_clear_young(struct vm_area_struct *vma,
 	offset = ((unsigned long)pmdp) & ~PAGE_MASK;
 	start_page = pmd_page;
 
-	cur_page = READ_ONCE(pmd_page->pt_replica);
+	cur_page = pmd_page->pt_replica;
 
 	while (cur_page && cur_page != start_page) {
 		pmd_t *replica_entry = (pmd_t *)(page_address(cur_page) + offset);
@@ -827,10 +805,8 @@ int pgtable_repl_pmdp_test_and_clear_young(struct vm_area_struct *vma,
 			}
 		}
 
-		cur_page = READ_ONCE(cur_page->pt_replica);
+		cur_page = cur_page->pt_replica;
 	}
-
-	smp_wmb();
 
 	mitosis_verify_after_pmdp_clear_young(pmdp);
 
@@ -862,7 +838,7 @@ pmd_t pgtable_repl_get_pmd(pmd_t *pmdp)
 	if (!pmd_page || !pfn_valid(page_to_pfn(pmd_page)))
 		return *pmdp;
 
-	if (!READ_ONCE(pmd_page->pt_replica))
+	if (!pmd_page->pt_replica)
 		return *pmdp;
 
 	val = pmd_val(*pmdp);
@@ -873,7 +849,7 @@ pmd_t pgtable_repl_get_pmd(pmd_t *pmdp)
 	offset = ((unsigned long)pmdp) & ~PAGE_MASK;
 	start_page = pmd_page;
 
-	cur_page = READ_ONCE(pmd_page->pt_replica);
+	cur_page = pmd_page->pt_replica;
 
 	while (cur_page && cur_page != start_page) {
 		pmd_t *replica_entry = (pmd_t *)(page_address(cur_page) + offset);
@@ -882,7 +858,7 @@ pmd_t pgtable_repl_get_pmd(pmd_t *pmdp)
 		if (pmd_present(replica_val))
 			val |= pmd_flags(replica_val);
 
-		cur_page = READ_ONCE(cur_page->pt_replica);
+		cur_page = cur_page->pt_replica;
 	}
 
 	{

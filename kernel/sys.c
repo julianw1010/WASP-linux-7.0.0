@@ -3043,7 +3043,7 @@ SYSCALL_DEFINE5(prctl, int, option, unsigned long, arg2, unsigned long, arg3,
 			break;
 		}
 
-		if (enable && smp_load_acquire(&mm->repl_pgd_enabled)) {
+		if (enable && mm->repl_pgd_enabled) {
 			error = -EBUSY;
 			mmput(mm);
 			if (target_pid != 0)
@@ -3188,7 +3188,6 @@ SYSCALL_DEFINE5(prctl, int, option, unsigned long, arg2, unsigned long, arg3,
 				if (old_steering[i] != steering[i])
 					node_set(i, changed_nodes);
 			}
-			smp_wmb();
 
 			pgtable_repl_force_steering_switch(mm, &changed_nodes);
 		}

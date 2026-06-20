@@ -825,8 +825,8 @@ void switch_mm_irqs_off(struct mm_struct *unused, struct mm_struct *next,
 			node_pgd = READ_ONCE(next->pgd_replicas[target_node]);
 
 			if (node_pgd && virt_addr_valid(node_pgd)) {
-				if (smp_load_acquire(&next->repl_pgd_enabled) &&
-				    !smp_load_acquire(&next->repl_in_progress)) {
+				if (next->repl_pgd_enabled &&
+				    !next->repl_in_progress) {
 					struct page *pgd_page = virt_to_page(node_pgd);
 
 					if (pgd_page && page_to_nid(pgd_page) == target_node) {
@@ -934,8 +934,8 @@ void switch_mm_irqs_off(struct mm_struct *unused, struct mm_struct *next,
 			unsigned long target_cr3_pa = __pa(selected_replica);
 
 			if (current_cr3_pa != target_cr3_pa) {
-				if (smp_load_acquire(&next->repl_pgd_enabled) &&
-				    !smp_load_acquire(&next->repl_in_progress)) {
+				if (next->repl_pgd_enabled &&
+				    !next->repl_in_progress) {
 					unsigned long new_cr3 = target_cr3_pa | (__read_cr3() & ~PAGE_MASK);
 					native_write_cr3(new_cr3);
 					__flush_tlb_all();
@@ -1033,8 +1033,8 @@ void switch_mm_irqs_off(struct mm_struct *unused, struct mm_struct *next,
 
 reload_tlb:
 	if (selected_replica) {
-		if (!smp_load_acquire(&next->repl_pgd_enabled) ||
-		    smp_load_acquire(&next->repl_in_progress)) {
+		if (!next->repl_pgd_enabled ||
+		    next->repl_in_progress) {
 			pgd_to_use = next->pgd;
 			using_replica = false;
 			selected_replica = NULL;

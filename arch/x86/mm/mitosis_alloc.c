@@ -56,7 +56,7 @@ int alloc_pte_replicas(struct page *base_page, struct mm_struct *mm,
 		new_page->pt_owner_mm = mm;
 		mm_inc_nr_ptes(mm);
 
-		WRITE_ONCE(new_page->pt_replica, NULL);
+		new_page->pt_replica = NULL;
 		pages[(*count)++] = new_page;
 	}
 
@@ -111,7 +111,7 @@ int alloc_pmd_replicas(struct page *base_page, struct mm_struct *mm,
 		new_page->pt_owner_mm = mm;
 		mm_inc_nr_pmds(mm);
 
-		WRITE_ONCE(new_page->pt_replica, NULL);
+		new_page->pt_replica = NULL;
 		pages[(*count)++] = new_page;
 	}
 
@@ -164,7 +164,7 @@ int alloc_pud_replicas(struct page *base_page, struct mm_struct *mm,
 		new_page->pt_owner_mm = mm;
 		mm_inc_nr_puds(mm);
 
-		WRITE_ONCE(new_page->pt_replica, NULL);
+		new_page->pt_replica = NULL;
 		pages[(*count)++] = new_page;
 	}
 
@@ -216,7 +216,7 @@ int alloc_p4d_replicas(struct page *base_page, struct mm_struct *mm,
 
 		new_page->pt_owner_mm = mm;
 
-		WRITE_ONCE(new_page->pt_replica, NULL);
+		new_page->pt_replica = NULL;
 		pages[(*count)++] = new_page;
 	}
 
@@ -268,7 +268,7 @@ int alloc_pgd_replicas(struct page *base_page, struct mm_struct *mm,
 
 		new_page->pt_owner_mm = mm;
 		if (mm)
-			WRITE_ONCE(new_page->pt_replica, NULL);
+			new_page->pt_replica = NULL;
 		pages[(*count)++] = new_page;
 	}
 
@@ -293,12 +293,10 @@ int mitosis_free_replica_chain(struct page *primary, int level, int order)
 
 	while (cur_page && cur_page != start_page && free_count < NUMA_NODE_COUNT) {
 		pages_to_free[free_count++] = cur_page;
-		next_page = READ_ONCE(cur_page->pt_replica);
-		WRITE_ONCE(cur_page->pt_replica, NULL);
+		next_page = cur_page->pt_replica;
+		cur_page->pt_replica = NULL;
 		cur_page = next_page;
 	}
-
-	smp_mb();
 
 	for (i = 0; i < free_count; i++) {
 		struct page *p = pages_to_free[i];
@@ -351,10 +349,10 @@ void pgtable_repl_alloc_pte(struct mm_struct *mm, unsigned long pfn)
 
 	base_page = pfn_to_page(pfn);
 
-	if (!smp_load_acquire(&mm->repl_pgd_enabled))
+	if (!mm->repl_pgd_enabled)
 		return;
 
-	if (READ_ONCE(base_page->pt_replica))
+	if (base_page->pt_replica)
 		return;
 
 	src_addr = page_address(base_page);
@@ -362,12 +360,10 @@ void pgtable_repl_alloc_pte(struct mm_struct *mm, unsigned long pfn)
 	if (ret != 0 || count < 2)
 		return;
 
-	for (i = 1; i < count; i++) {
+	for (i = 1; i < count; i++)
 		memcpy(page_address(pages[i]), src_addr, PAGE_SIZE);
-		clflush_cache_range(page_address(pages[i]), PAGE_SIZE);
-	}
 
-	if (!smp_load_acquire(&mm->repl_pgd_enabled) ||
+	if (!mm->repl_pgd_enabled ||
 	    !link_page_replicas(pages, count)) {
 		for (i = 1; i < count; i++) {
 			pagetable_dtor(page_ptdesc(pages[i]));
@@ -394,10 +390,10 @@ void pgtable_repl_alloc_pmd(struct mm_struct *mm, unsigned long pfn)
 
 	base_page = pfn_to_page(pfn);
 
-	if (!smp_load_acquire(&mm->repl_pgd_enabled))
+	if (!mm->repl_pgd_enabled)
 		return;
 
-	if (READ_ONCE(base_page->pt_replica))
+	if (base_page->pt_replica)
 		return;
 
 	src_addr = page_address(base_page);
@@ -405,12 +401,10 @@ void pgtable_repl_alloc_pmd(struct mm_struct *mm, unsigned long pfn)
 	if (ret != 0 || count < 2)
 		return;
 
-	for (i = 1; i < count; i++) {
+	for (i = 1; i < count; i++)
 		memcpy(page_address(pages[i]), src_addr, PAGE_SIZE);
-		clflush_cache_range(page_address(pages[i]), PAGE_SIZE);
-	}
 
-	if (!smp_load_acquire(&mm->repl_pgd_enabled) ||
+	if (!mm->repl_pgd_enabled ||
 	    !link_page_replicas(pages, count)) {
 		for (i = 1; i < count; i++) {
 			pagetable_dtor(page_ptdesc(pages[i]));
@@ -437,10 +431,10 @@ void pgtable_repl_alloc_pud(struct mm_struct *mm, unsigned long pfn)
 
 	base_page = pfn_to_page(pfn);
 
-	if (!smp_load_acquire(&mm->repl_pgd_enabled))
+	if (!mm->repl_pgd_enabled)
 		return;
 
-	if (READ_ONCE(base_page->pt_replica))
+	if (base_page->pt_replica)
 		return;
 
 	src_addr = page_address(base_page);
@@ -448,12 +442,10 @@ void pgtable_repl_alloc_pud(struct mm_struct *mm, unsigned long pfn)
 	if (ret != 0 || count < 2)
 		return;
 
-	for (i = 1; i < count; i++) {
+	for (i = 1; i < count; i++)
 		memcpy(page_address(pages[i]), src_addr, PAGE_SIZE);
-		clflush_cache_range(page_address(pages[i]), PAGE_SIZE);
-	}
 
-	if (!smp_load_acquire(&mm->repl_pgd_enabled) ||
+	if (!mm->repl_pgd_enabled ||
 	    !link_page_replicas(pages, count)) {
 		for (i = 1; i < count; i++) {
 			mm_dec_nr_puds(mm);
@@ -482,10 +474,10 @@ void pgtable_repl_alloc_p4d(struct mm_struct *mm, unsigned long pfn)
 
 	base_page = pfn_to_page(pfn);
 
-	if (!smp_load_acquire(&mm->repl_pgd_enabled))
+	if (!mm->repl_pgd_enabled)
 		return;
 
-	if (READ_ONCE(base_page->pt_replica))
+	if (base_page->pt_replica)
 		return;
 
 	src_addr = page_address(base_page);
@@ -493,12 +485,10 @@ void pgtable_repl_alloc_p4d(struct mm_struct *mm, unsigned long pfn)
 	if (ret != 0 || count < 2)
 		return;
 
-	for (i = 1; i < count; i++) {
+	for (i = 1; i < count; i++)
 		memcpy(page_address(pages[i]), src_addr, PAGE_SIZE);
-		clflush_cache_range(page_address(pages[i]), PAGE_SIZE);
-	}
 
-	if (!smp_load_acquire(&mm->repl_pgd_enabled) ||
+	if (!mm->repl_pgd_enabled ||
 	    !link_page_replicas(pages, count)) {
 		for (i = 1; i < count; i++) {
 			pages[i]->pt_owner_mm = NULL;
@@ -529,12 +519,10 @@ void pgtable_repl_release_pte(unsigned long pfn)
 
 		while (cur_page && cur_page != start_page && free_count < NUMA_NODE_COUNT) {
 			pages_to_free[free_count++] = cur_page;
-			next_page = READ_ONCE(cur_page->pt_replica);
-			WRITE_ONCE(cur_page->pt_replica, NULL);
+			next_page = cur_page->pt_replica;
+			cur_page->pt_replica = NULL;
 			cur_page = next_page;
 		}
-
-		smp_mb();
 
 		for (i = 0; i < free_count; i++) {
 			struct page *p = pages_to_free[i];
@@ -582,12 +570,10 @@ void pgtable_repl_release_pmd(unsigned long pfn)
 
 		while (cur_page && cur_page != start_page && free_count < NUMA_NODE_COUNT) {
 			pages_to_free[free_count++] = cur_page;
-			next_page = READ_ONCE(cur_page->pt_replica);
-			WRITE_ONCE(cur_page->pt_replica, NULL);
+			next_page = cur_page->pt_replica;
+			cur_page->pt_replica = NULL;
 			cur_page = next_page;
 		}
-
-		smp_mb();
 
 		for (i = 0; i < free_count; i++) {
 			struct page *p = pages_to_free[i];
@@ -635,12 +621,10 @@ void pgtable_repl_release_pud(unsigned long pfn)
 
 		while (cur_page && cur_page != start_page && free_count < NUMA_NODE_COUNT) {
 			pages_to_free[free_count++] = cur_page;
-			next_page = READ_ONCE(cur_page->pt_replica);
-			WRITE_ONCE(cur_page->pt_replica, NULL);
+			next_page = cur_page->pt_replica;
+			cur_page->pt_replica = NULL;
 			cur_page = next_page;
 		}
-
-		smp_mb();
 
 		for (i = 0; i < free_count; i++) {
 			struct page *p = pages_to_free[i];
@@ -686,12 +670,10 @@ void pgtable_repl_release_p4d(unsigned long pfn)
 
 		while (cur_page && cur_page != start_page && free_count < NUMA_NODE_COUNT) {
 			pages_to_free[free_count++] = cur_page;
-			next_page = READ_ONCE(cur_page->pt_replica);
-			WRITE_ONCE(cur_page->pt_replica, NULL);
+			next_page = cur_page->pt_replica;
+			cur_page->pt_replica = NULL;
 			cur_page = next_page;
 		}
-
-		smp_mb();
 
 		for (i = 0; i < free_count; i++) {
 			struct page *p = pages_to_free[i];
@@ -713,4 +695,3 @@ void pgtable_repl_release_p4d(unsigned long pfn)
 
 	mitosis_verify_after_free_replicas(primary, MITOSIS_CACHE_P4D);
 }
-
