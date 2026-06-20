@@ -888,7 +888,6 @@ int pgtable_repl_disable_external(struct task_struct *target)
 	wait_for_completion(&work.done);
 	return work.result;
 }
-EXPORT_SYMBOL(pgtable_repl_disable_external);
 
 static int __init mitosis_check_numa_node_count(void)
 {
@@ -908,7 +907,3 @@ static int __init mitosis_check_numa_node_count(void)
 }
 early_initcall(mitosis_check_numa_node_count);
 
-EXPORT_SYMBOL(pgtable_repl_enable);
-EXPORT_SYMBOL(pgtable_repl_disable);
-EXPORT_SYMBOL(mitosis_inherit_sysctl_handler);
-EXPORT_SYMBOL(pgtable_repl_enable_external);

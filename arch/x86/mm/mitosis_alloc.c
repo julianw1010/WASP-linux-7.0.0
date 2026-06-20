@@ -336,7 +336,6 @@ int mitosis_free_replica_chain(struct page *primary, int level, int order)
 
 	return free_count;
 }
-EXPORT_SYMBOL(mitosis_free_replica_chain);
 
 void pgtable_repl_alloc_pte(struct mm_struct *mm, unsigned long pfn)
 {
@@ -714,11 +713,3 @@ void pgtable_repl_release_p4d(unsigned long pfn)
 	mitosis_verify_after_free_replicas(primary, MITOSIS_CACHE_P4D);
 }
 
-EXPORT_SYMBOL(pgtable_repl_alloc_pte);
-EXPORT_SYMBOL(pgtable_repl_alloc_pmd);
-EXPORT_SYMBOL(pgtable_repl_alloc_pud);
-EXPORT_SYMBOL(pgtable_repl_alloc_p4d);
-EXPORT_SYMBOL(pgtable_repl_release_pte);
-EXPORT_SYMBOL(pgtable_repl_release_pmd);
-EXPORT_SYMBOL(pgtable_repl_release_pud);
-EXPORT_SYMBOL(pgtable_repl_release_p4d);

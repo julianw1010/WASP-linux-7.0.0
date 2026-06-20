@@ -2,7 +2,6 @@
 #include <asm/pgtable_repl.h>
 
 int sysctl_mitosis_verify_enabled;
-EXPORT_SYMBOL(sysctl_mitosis_verify_enabled);
 
 void mitosis_verify_chain_integrity(struct page *primary, struct mm_struct *mm,
 				    int level)
@@ -107,7 +106,6 @@ void mitosis_verify_chain_integrity(struct page *primary, struct mm_struct *mm,
 		}
 	}
 }
-EXPORT_SYMBOL(mitosis_verify_chain_integrity);
 
 static void verify_page_full(struct page *primary_page,
 			     struct mm_struct *mm, int level)
@@ -399,7 +397,6 @@ void mitosis_verify_tree_consistency(struct mm_struct *mm)
 		}
 	}
 }
-EXPORT_SYMBOL(mitosis_verify_tree_consistency);
 
 void mitosis_verify_after_fork(struct mm_struct *child, struct mm_struct *parent)
 {
@@ -570,7 +567,6 @@ void mitosis_verify_after_fork(struct mm_struct *child, struct mm_struct *parent
 		}
 	}
 }
-EXPORT_SYMBOL(mitosis_verify_after_fork);
 
 void mitosis_verify_pti_consistency(struct mm_struct *mm)
 {
@@ -647,7 +643,6 @@ void mitosis_verify_pti_consistency(struct mm_struct *mm)
 		cur = READ_ONCE(cur->pt_replica);
 	} while (cur && cur != pgd_page);
 }
-EXPORT_SYMBOL(mitosis_verify_pti_consistency);
 
 void mitosis_verify_cache_pop(struct page *page, int node)
 {
@@ -698,7 +693,6 @@ void mitosis_verify_cache_pop(struct page *page, int node)
 		}
 	}
 }
-EXPORT_SYMBOL(mitosis_verify_cache_pop);
 
 void mitosis_verify_mm_coherence(struct mm_struct *mm)
 {
@@ -813,7 +807,6 @@ void mitosis_verify_mm_coherence(struct mm_struct *mm)
 		}
 	}
 }
-EXPORT_SYMBOL(mitosis_verify_mm_coherence);
 
 void mitosis_verify_after_set_pte(pte_t *ptep, pte_t pteval)
 {
@@ -872,7 +865,6 @@ void mitosis_verify_after_set_pte(pte_t *ptep, pte_t pteval)
 			break;
 	}
 }
-EXPORT_SYMBOL(mitosis_verify_after_set_pte);
 
 void mitosis_verify_after_set_pmd(pmd_t *pmdp, pmd_t pmdval)
 {
@@ -948,7 +940,6 @@ void mitosis_verify_after_set_pmd(pmd_t *pmdp, pmd_t pmdval)
 			break;
 	}
 }
-EXPORT_SYMBOL(mitosis_verify_after_set_pmd);
 
 void mitosis_verify_after_set_pud(pud_t *pudp, pud_t pudval)
 {
@@ -1007,7 +998,6 @@ void mitosis_verify_after_set_pud(pud_t *pudp, pud_t pudval)
 			break;
 	}
 }
-EXPORT_SYMBOL(mitosis_verify_after_set_pud);
 
 void mitosis_verify_after_set_p4d(p4d_t *p4dp, p4d_t p4dval)
 {
@@ -1064,7 +1054,6 @@ void mitosis_verify_after_set_p4d(p4d_t *p4dp, p4d_t p4dval)
 			break;
 	}
 }
-EXPORT_SYMBOL(mitosis_verify_after_set_p4d);
 
 void mitosis_verify_after_set_pgd(pgd_t *pgdp, pgd_t pgdval)
 {
@@ -1121,7 +1110,6 @@ void mitosis_verify_after_set_pgd(pgd_t *pgdp, pgd_t pgdval)
 			break;
 	}
 }
-EXPORT_SYMBOL(mitosis_verify_after_set_pgd);
 
 void mitosis_verify_after_thp_split(struct mm_struct *mm, pmd_t *pmdp)
 {
@@ -1219,7 +1207,6 @@ void mitosis_verify_after_thp_split(struct mm_struct *mm, pmd_t *pmdp)
 	mitosis_verify_chain_integrity(pmd_page, mm, MITOSIS_CACHE_PMD);
 	mitosis_verify_chain_integrity(primary_pte_page, mm, MITOSIS_CACHE_PTE);
 }
-EXPORT_SYMBOL(mitosis_verify_after_thp_split);
 
 void mitosis_verify_after_ptep_get_and_clear(pte_t *ptep)
 {
@@ -1263,7 +1250,6 @@ void mitosis_verify_after_ptep_get_and_clear(pte_t *ptep)
 			break;
 	}
 }
-EXPORT_SYMBOL(mitosis_verify_after_ptep_get_and_clear);
 
 void mitosis_verify_after_ptep_set_wrprotect(pte_t *ptep)
 {
@@ -1306,7 +1292,6 @@ void mitosis_verify_after_ptep_set_wrprotect(pte_t *ptep)
 			break;
 	}
 }
-EXPORT_SYMBOL(mitosis_verify_after_ptep_set_wrprotect);
 
 void mitosis_verify_after_pmdp_set_wrprotect(pmd_t *pmdp)
 {
@@ -1348,7 +1333,6 @@ void mitosis_verify_after_pmdp_set_wrprotect(pmd_t *pmdp)
 			break;
 	}
 }
-EXPORT_SYMBOL(mitosis_verify_after_pmdp_set_wrprotect);
 
 void mitosis_verify_after_pmdp_huge_get_and_clear(pmd_t *pmdp)
 {
@@ -1392,7 +1376,6 @@ void mitosis_verify_after_pmdp_huge_get_and_clear(pmd_t *pmdp)
 			break;
 	}
 }
-EXPORT_SYMBOL(mitosis_verify_after_pmdp_huge_get_and_clear);
 
 void mitosis_verify_after_pmdp_establish(pmd_t *pmdp, pmd_t newpmd)
 {
@@ -1461,7 +1444,6 @@ void mitosis_verify_after_pmdp_establish(pmd_t *pmdp, pmd_t newpmd)
 			break;
 	}
 }
-EXPORT_SYMBOL(mitosis_verify_after_pmdp_establish);
 
 void mitosis_verify_after_deposit(struct mm_struct *mm, pmd_t *pmdp,
 				  pgtable_t pgtable)
@@ -1489,7 +1471,6 @@ void mitosis_verify_after_deposit(struct mm_struct *mm, pmd_t *pmdp,
 		BUG();
 	}
 }
-EXPORT_SYMBOL(mitosis_verify_after_deposit);
 
 void mitosis_verify_after_withdraw(struct mm_struct *mm, pmd_t *pmdp,
 				   pgtable_t pgtable)
@@ -1522,17 +1503,14 @@ void mitosis_verify_after_withdraw(struct mm_struct *mm, pmd_t *pmdp,
 		BUG();
 	}
 }
-EXPORT_SYMBOL(mitosis_verify_after_withdraw);
 
 void mitosis_verify_get_pte(pte_t *ptep, pte_t result)
 {
 }
-EXPORT_SYMBOL(mitosis_verify_get_pte);
 
 void mitosis_verify_get_pmd(pmd_t *pmdp, pmd_t result)
 {
 }
-EXPORT_SYMBOL(mitosis_verify_get_pmd);
 
 void mitosis_verify_after_ptep_clear_young(pte_t *ptep)
 {
@@ -1573,7 +1551,6 @@ void mitosis_verify_after_ptep_clear_young(pte_t *ptep)
 			break;
 	}
 }
-EXPORT_SYMBOL(mitosis_verify_after_ptep_clear_young);
 
 void mitosis_verify_after_pmdp_clear_young(pmd_t *pmdp)
 {
@@ -1615,7 +1592,6 @@ void mitosis_verify_after_pmdp_clear_young(pmd_t *pmdp)
 			break;
 	}
 }
-EXPORT_SYMBOL(mitosis_verify_after_pmdp_clear_young);
 
 void mitosis_verify_after_repl_alloc(struct mm_struct *mm, unsigned long pfn,
 				     int level)
@@ -1672,7 +1648,6 @@ void mitosis_verify_after_repl_alloc(struct mm_struct *mm, unsigned long pfn,
 		}
 	}
 }
-EXPORT_SYMBOL(mitosis_verify_after_repl_alloc);
 
 void mitosis_verify_after_thp_collapse(struct mm_struct *mm, pmd_t *pmdp)
 {
@@ -1746,7 +1721,6 @@ void mitosis_verify_after_thp_collapse(struct mm_struct *mm, pmd_t *pmdp)
 	}
 	mitosis_verify_chain_integrity(pmd_page, mm, MITOSIS_CACHE_PMD);
 }
-EXPORT_SYMBOL(mitosis_verify_after_thp_collapse);
 
 static void verify_enable_walk_tree(struct mm_struct *mm, const char *caller)
 {
@@ -1889,7 +1863,6 @@ void mitosis_verify_after_enable(struct mm_struct *mm)
 
 	mitosis_verify_mm_coherence(mm);
 }
-EXPORT_SYMBOL(mitosis_verify_after_enable);
 
 static void verify_disable_walk_tree(struct mm_struct *mm)
 {
@@ -2010,7 +1983,6 @@ void mitosis_verify_after_disable(struct mm_struct *mm)
 
 	verify_disable_walk_tree(mm);
 }
-EXPORT_SYMBOL(mitosis_verify_after_disable);
 
 void mitosis_verify_after_cr3_switch(struct mm_struct *mm)
 {
@@ -2058,7 +2030,6 @@ void mitosis_verify_after_cr3_switch(struct mm_struct *mm)
 		BUG();
 	}
 }
-EXPORT_SYMBOL(mitosis_verify_after_cr3_switch);
 
 void mitosis_verify_after_free_replicas(struct page *primary, int level)
 {
@@ -2075,7 +2046,6 @@ void mitosis_verify_after_free_replicas(struct page *primary, int level)
 		BUG();
 	}
 }
-EXPORT_SYMBOL(mitosis_verify_after_free_replicas);
 
 void mitosis_verify_fault_locality(struct mm_struct *mm, unsigned long address)
 {
@@ -2180,4 +2150,3 @@ void mitosis_verify_fault_locality(struct mm_struct *mm, unsigned long address)
 		}
 	}
 }
-EXPORT_SYMBOL(mitosis_verify_fault_locality);

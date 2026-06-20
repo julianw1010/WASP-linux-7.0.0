@@ -15,7 +15,6 @@ struct mitosis_cache_head mitosis_cache[NUMA_NODE_COUNT] = {
 		.returns	= ATOMIC64_INIT(0),
 	}
 };
-EXPORT_SYMBOL(mitosis_cache);
 
 bool mitosis_cache_push(struct page *page, int node, int level)
 {
@@ -41,7 +40,6 @@ bool mitosis_cache_push(struct page *page, int node, int level)
 
 	return true;
 }
-EXPORT_SYMBOL(mitosis_cache_push);
 
 struct page *mitosis_cache_pop(int node, int level)
 {
@@ -77,7 +75,6 @@ struct page *mitosis_cache_pop(int node, int level)
 
 	return page;
 }
-EXPORT_SYMBOL(mitosis_cache_pop);
 
 int mitosis_cache_drain_node(int node)
 {
@@ -109,7 +106,6 @@ int mitosis_cache_drain_node(int node)
 
 	return freed;
 }
-EXPORT_SYMBOL(mitosis_cache_drain_node);
 
 int mitosis_cache_drain_all(void)
 {
@@ -121,4 +117,3 @@ int mitosis_cache_drain_all(void)
 
 	return total;
 }
-EXPORT_SYMBOL(mitosis_cache_drain_all);

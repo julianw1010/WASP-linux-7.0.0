@@ -103,4 +103,3 @@ void pgtable_repl_force_steering_switch(struct mm_struct *mm,
 	on_each_cpu_mask(target_cpus, steering_switch_cr3_ipi, &switch_info, 1);
 	free_cpumask_var(target_cpus);
 }
-EXPORT_SYMBOL(pgtable_repl_force_steering_switch);
