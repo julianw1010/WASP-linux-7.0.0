@@ -282,7 +282,7 @@ void pgtable_repl_alloc_p4d(struct mm_struct *mm, unsigned long pfn)
 	pgtable_repl_alloc(mm, pfn, MITOSIS_CACHE_P4D);
 }
 
-void pgtable_repl_release_pte(struct mm_struct *mm, unsigned long pfn)
+void pgtable_repl_release_pte(unsigned long pfn)
 {
 	if (!pfn_valid(pfn))
 		return;
@@ -292,7 +292,7 @@ void pgtable_repl_release_pte(struct mm_struct *mm, unsigned long pfn)
 	mitosis_verify_after_free_replicas(pfn_to_page(pfn), MITOSIS_CACHE_PTE);
 }
 
-void pgtable_repl_release_pmd(struct mm_struct *mm, unsigned long pfn)
+void pgtable_repl_release_pmd(unsigned long pfn)
 {
 	if (!pfn_valid(pfn))
 		return;
@@ -302,7 +302,7 @@ void pgtable_repl_release_pmd(struct mm_struct *mm, unsigned long pfn)
 	mitosis_verify_after_free_replicas(pfn_to_page(pfn), MITOSIS_CACHE_PMD);
 }
 
-void pgtable_repl_release_pud(struct mm_struct *mm, unsigned long pfn)
+void pgtable_repl_release_pud(unsigned long pfn)
 {
 	if (!pfn_valid(pfn))
 		return;
@@ -312,7 +312,7 @@ void pgtable_repl_release_pud(struct mm_struct *mm, unsigned long pfn)
 	mitosis_verify_after_free_replicas(pfn_to_page(pfn), MITOSIS_CACHE_PUD);
 }
 
-void pgtable_repl_release_p4d(struct mm_struct *mm, unsigned long pfn)
+void pgtable_repl_release_p4d(unsigned long pfn)
 {
 	if (!pgtable_l5_enabled() || !pfn_valid(pfn))
 		return;

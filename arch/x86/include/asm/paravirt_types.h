@@ -138,10 +138,10 @@ struct pv_mmu_ops {
 	void (*alloc_pmd)(struct mm_struct *mm, unsigned long pfn);
 	void (*alloc_pud)(struct mm_struct *mm, unsigned long pfn);
 	void (*alloc_p4d)(struct mm_struct *mm, unsigned long pfn);
-	void (*release_pte)(struct mm_struct *mm, unsigned long pfn);
-	void (*release_pmd)(struct mm_struct *mm, unsigned long pfn);
-	void (*release_pud)(struct mm_struct *mm, unsigned long pfn);
-	void (*release_p4d)(struct mm_struct *mm, unsigned long pfn);
+	void (*release_pte)(unsigned long pfn);
+	void (*release_pmd)(unsigned long pfn);
+	void (*release_pud)(unsigned long pfn);
+	void (*release_p4d)(unsigned long pfn);
 
 	/* Pagetable manipulation functions */
 	void (*set_pte)(pte_t *ptep, pte_t pteval);

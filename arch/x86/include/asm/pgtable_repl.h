@@ -78,10 +78,10 @@ void pgtable_repl_alloc_pud(struct mm_struct *mm, unsigned long pfn);
 void pgtable_repl_alloc_p4d(struct mm_struct *mm, unsigned long pfn);
 
 
-void pgtable_repl_release_pte(struct mm_struct *mm, unsigned long pfn);
-void pgtable_repl_release_pmd(struct mm_struct *mm, unsigned long pfn);
-void pgtable_repl_release_pud(struct mm_struct *mm, unsigned long pfn);
-void pgtable_repl_release_p4d(struct mm_struct *mm, unsigned long pfn);
+void pgtable_repl_release_pte(unsigned long pfn);
+void pgtable_repl_release_pmd(unsigned long pfn);
+void pgtable_repl_release_pud(unsigned long pfn);
+void pgtable_repl_release_p4d(unsigned long pfn);
 
 int mitosis_inherit_sysctl_handler(struct ctl_table *table, int write,
 				   void *buffer, size_t *lenp, loff_t *ppos);

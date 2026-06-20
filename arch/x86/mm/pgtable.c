@@ -26,7 +26,7 @@ void ___pte_free_tlb(struct mmu_gather *tlb, struct page *pte)
 	struct ptdesc *ptdesc = page_ptdesc(pte);
 	bool from_cache = PageMitosisFromCache(pte);
 
-	paravirt_release_pte(tlb->mm, page_to_pfn(pte));
+	paravirt_release_pte(page_to_pfn(pte));
 
 	if (from_cache)
 		pagetable_dtor(ptdesc);
@@ -47,7 +47,7 @@ void ___pmd_free_tlb(struct mmu_gather *tlb, pmd_t *pmd)
 	struct page *page = ptdesc_page(ptdesc);
 	bool from_cache = PageMitosisFromCache(page);
 
-	paravirt_release_pmd(tlb->mm, __pa(pmd) >> PAGE_SHIFT);
+	paravirt_release_pmd(__pa(pmd) >> PAGE_SHIFT);
 	/*
 	 * NOTE! For PAE, any changes to the top page-directory-pointer-table
 	 * entries need a full cr3 reload to flush.
@@ -74,7 +74,7 @@ void ___pud_free_tlb(struct mmu_gather *tlb, pud_t *pud)
 	struct page *page = ptdesc_page(ptdesc);
 	bool from_cache = PageMitosisFromCache(page);
 
-	paravirt_release_pud(tlb->mm, __pa(pud) >> PAGE_SHIFT);
+	paravirt_release_pud(__pa(pud) >> PAGE_SHIFT);
 
 	if (from_cache)
 		pagetable_dtor(ptdesc);
@@ -95,7 +95,7 @@ void ___p4d_free_tlb(struct mmu_gather *tlb, p4d_t *p4d)
 	struct page *page = ptdesc_page(ptdesc);
 	bool from_cache = PageMitosisFromCache(page);
 
-	paravirt_release_p4d(tlb->mm, __pa(p4d) >> PAGE_SHIFT);
+	paravirt_release_p4d(__pa(p4d) >> PAGE_SHIFT);
 
 	if (from_cache)
 		pagetable_dtor(ptdesc);
@@ -282,7 +282,7 @@ static void mop_up_one_pmd(struct mm_struct *mm, pgd_t *pgdp)
 
 		pgd_clear(pgdp);
 
-		paravirt_release_pmd(mm, pgd_val(pgd) >> PAGE_SHIFT);
+		paravirt_release_pmd(pgd_val(pgd) >> PAGE_SHIFT);
 		pmd_free(mm, pmd);
 		mm_dec_nr_pmds(mm);
 	}
