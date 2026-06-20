@@ -33,7 +33,7 @@ void pgtable_repl_set_pte(pte_t *ptep, pte_t pteval)
 	while (cur_page && cur_page != start_page) {
 		pte_t *replica_entry = (pte_t *)(page_address(cur_page) + offset);
 
-		WRITE_ONCE(*replica_entry, pte_mkold(pteval));
+		WRITE_ONCE(*replica_entry, pteval);
 		cur_page = cur_page->pt_replica;
 	}
 
@@ -111,11 +111,6 @@ void pgtable_repl_set_pmd(pmd_t *pmdp, pmd_t pmdval)
 		} else {
 			node_val = entry_val;
 		}
-
-		if (cur_page != parent_page &&
-		    pmd_present(__pmd(node_val)) &&
-		    pmd_trans_huge(__pmd(node_val)))
-			node_val = pmd_val(pmd_mkold(__pmd(node_val)));
 
 		WRITE_ONCE(*replica_entry, __pmd(node_val));
 
@@ -710,17 +705,13 @@ pmd_t pgtable_repl_pmdp_establish(struct mm_struct *mm, pmd_t *pmdp, pmd_t pmd)
 
 	while (cur_page && cur_page != start_page) {
 		pmd_t *replica_entry = (pmd_t *)(page_address(cur_page) + offset);
-		pmd_t repl_pmd = pmd;
 		pmd_t old_repl;
 
-		if (pmd_present(repl_pmd) && pmd_trans_huge(repl_pmd))
-			repl_pmd = pmd_mkold(repl_pmd);
-
 		if (IS_ENABLED(CONFIG_SMP)) {
-			old_repl = __pmd(pmd_val(xchg(replica_entry, repl_pmd)));
+			old_repl = __pmd(pmd_val(xchg(replica_entry, pmd)));
 		} else {
 			old_repl = *replica_entry;
-			WRITE_ONCE(*replica_entry, repl_pmd);
+			WRITE_ONCE(*replica_entry, pmd);
 		}
 
 		val |= pmd_flags(old_repl);

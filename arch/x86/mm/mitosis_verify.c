@@ -1072,8 +1072,7 @@ void mitosis_verify_after_repl_alloc(struct mm_struct *mm, unsigned long pfn,
 			unsigned long dst_val = READ_ONCE(dst_entries[idx]);
 
 			if (src_val & _PAGE_PRESENT)
-				BUG_ON((dst_val & ~_PAGE_ACCESSED) !=
-				       (src_val & ~_PAGE_ACCESSED));
+				BUG_ON(dst_val != src_val);
 		}
 
 		replica = READ_ONCE(replica->pt_replica);
