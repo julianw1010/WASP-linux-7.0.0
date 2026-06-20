@@ -1062,9 +1062,6 @@ reload_tlb:
 	this_cpu_write(cpu_tlbstate.loaded_mm, next);
 	this_cpu_write(cpu_tlbstate.loaded_mm_asid, ns.asid);
 	cpu_tlbstate_update_lam(new_lam, mm_untag_mask(next));
-
-	mitosis_verify_after_cr3_switch(next);
-
 	if (rcu_held)
 		rcu_read_unlock();
 

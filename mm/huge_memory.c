@@ -2989,7 +2989,6 @@ static void __split_huge_zero_page_pmd(struct vm_area_struct *vma,
 	pgtable_repl_free_pte_replicas(mm, pgtable);
 	pmd_populate(mm, pmd, pgtable);
 
-	mitosis_verify_after_thp_split(mm, pmd);
 }
 
 static void __split_huge_pmd_locked(struct vm_area_struct *vma, pmd_t *pmd,
@@ -3278,7 +3277,6 @@ static void __split_huge_pmd_locked(struct vm_area_struct *vma, pmd_t *pmd,
 	pgtable_repl_free_pte_replicas(mm, pgtable);
 	pmd_populate(mm, pmd, pgtable);
 
-	mitosis_verify_after_thp_split(mm, pmd);
 }
 
 void split_huge_pmd_locked(struct vm_area_struct *vma, unsigned long address,

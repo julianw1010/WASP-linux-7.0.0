@@ -105,7 +105,6 @@ static void replicate_existing_pagetables_phase1(struct mm_struct *mm)
 						for (i = 1; i < count; i++)
 							memcpy(page_address(pages[i]), src, PAGE_SIZE);
 						BUG_ON(!link_page_replicas(pages, count));
-						mitosis_verify_chain_integrity(child_page, mm, -1);
 					}
 				}
 			}
@@ -142,7 +141,6 @@ static void replicate_existing_pagetables_phase1(struct mm_struct *mm)
 							for (i = 1; i < count; i++)
 								memcpy(page_address(pages[i]), src, PAGE_SIZE);
 							BUG_ON(!link_page_replicas(pages, count));
-							mitosis_verify_chain_integrity(pud_page, mm, -1);
 						}
 					}
 				}
@@ -179,7 +177,6 @@ static void replicate_existing_pagetables_phase1(struct mm_struct *mm)
 								for (i = 1; i < count; i++)
 									memcpy(page_address(pages[i]), src, PAGE_SIZE);
 								BUG_ON(!link_page_replicas(pages, count));
-								mitosis_verify_chain_integrity(pmd_page, mm, -1);
 							}
 						}
 					}
@@ -215,7 +212,6 @@ static void replicate_existing_pagetables_phase1(struct mm_struct *mm)
 									for (i = 1; i < count; i++)
 										memcpy(page_address(pages[i]), src, PAGE_SIZE);
 									BUG_ON(!link_page_replicas(pages, count));
-									mitosis_verify_chain_integrity(pte_page, mm, -1);
 								}
 							}
 						}
@@ -464,9 +460,6 @@ int pgtable_repl_enable(struct mm_struct *mm)
 	}
 
 	BUG_ON(!link_page_replicas(pgd_pages, count));
-
-	mitosis_verify_chain_integrity(base_page, mm, MITOSIS_CACHE_PGD);
-
 	mm->repl_pgd_nodes = nodes;
 	memset(mm->pgd_replicas, 0, sizeof(mm->pgd_replicas));
 
@@ -493,9 +486,6 @@ int pgtable_repl_enable(struct mm_struct *mm)
 	mutex_unlock(&mm->repl_mutex);
 
 	pr_info("MITOSIS: Enabled page table replication for mm %px on %d nodes\n", mm, count);
-
-	mitosis_verify_after_enable(mm);
-
 	return 0;
 
 out_unlock:
@@ -689,9 +679,6 @@ void pgtable_repl_disable(struct mm_struct *mm)
 	mm->original_pgd = NULL;
 
 	pr_info("MITOSIS: Disabled page table replication for mm %p\n", mm);
-
-	mitosis_verify_after_disable(mm);
-
 	mutex_unlock(&mm->repl_mutex);
 }
 

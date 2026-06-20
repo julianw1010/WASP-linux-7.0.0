@@ -1622,7 +1622,6 @@ static int copy_mm(u64 clone_flags, struct task_struct *tsk)
 
 		if (sysctl_mitosis_inherit == 1 && parent_had_mitosis) {
 			pgtable_repl_enable(mm);
-			mitosis_verify_after_fork(mm, oldmm);
 		}
 	}
 

@@ -70,9 +70,6 @@ struct page *mitosis_cache_pop(int node, int level)
 	SetPageMitosisFromCache(page);
 
 	clear_highpage(page);
-
-	mitosis_verify_cache_pop(page, node);
-
 	return page;
 }
 

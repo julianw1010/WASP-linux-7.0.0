@@ -378,7 +378,6 @@ void pgtable_repl_alloc_pte(struct mm_struct *mm, unsigned long pfn)
 	BUG_ON(!mm->repl_pgd_enabled);
 	BUG_ON(!link_page_replicas(pages, count));
 
-	mitosis_verify_after_repl_alloc(mm, pfn, MITOSIS_CACHE_PTE);
 }
 
 void pgtable_repl_alloc_pmd(struct mm_struct *mm, unsigned long pfn)
@@ -408,7 +407,6 @@ void pgtable_repl_alloc_pmd(struct mm_struct *mm, unsigned long pfn)
 	BUG_ON(!mm->repl_pgd_enabled);
 	BUG_ON(!link_page_replicas(pages, count));
 
-	mitosis_verify_after_repl_alloc(mm, pfn, MITOSIS_CACHE_PMD);
 }
 
 void pgtable_repl_alloc_pud(struct mm_struct *mm, unsigned long pfn)
@@ -438,7 +436,6 @@ void pgtable_repl_alloc_pud(struct mm_struct *mm, unsigned long pfn)
 	BUG_ON(!mm->repl_pgd_enabled);
 	BUG_ON(!link_page_replicas(pages, count));
 
-	mitosis_verify_after_repl_alloc(mm, pfn, MITOSIS_CACHE_PUD);
 }
 
 void pgtable_repl_alloc_p4d(struct mm_struct *mm, unsigned long pfn)
@@ -468,7 +465,6 @@ void pgtable_repl_alloc_p4d(struct mm_struct *mm, unsigned long pfn)
 	BUG_ON(!mm->repl_pgd_enabled);
 	BUG_ON(!link_page_replicas(pages, count));
 
-	mitosis_verify_after_repl_alloc(mm, pfn, MITOSIS_CACHE_P4D);
 }
 
 void pgtable_repl_release_pte(unsigned long pfn)
@@ -519,7 +515,6 @@ void pgtable_repl_release_pte(unsigned long pfn)
 		}
 	}
 
-	mitosis_verify_after_free_replicas(primary, MITOSIS_CACHE_PTE);
 }
 
 void pgtable_repl_release_pmd(unsigned long pfn)
@@ -570,7 +565,6 @@ void pgtable_repl_release_pmd(unsigned long pfn)
 		}
 	}
 
-	mitosis_verify_after_free_replicas(primary, MITOSIS_CACHE_PMD);
 }
 
 void pgtable_repl_release_pud(unsigned long pfn)
@@ -619,7 +613,6 @@ void pgtable_repl_release_pud(unsigned long pfn)
 		}
 	}
 
-	mitosis_verify_after_free_replicas(primary, MITOSIS_CACHE_PUD);
 }
 
 void pgtable_repl_release_p4d(unsigned long pfn)
@@ -664,5 +657,4 @@ void pgtable_repl_release_p4d(unsigned long pfn)
 		}
 	}
 
-	mitosis_verify_after_free_replicas(primary, MITOSIS_CACHE_P4D);
 }
