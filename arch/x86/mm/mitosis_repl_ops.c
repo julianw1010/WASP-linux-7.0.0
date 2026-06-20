@@ -18,12 +18,8 @@ void pgtable_repl_set_pte(pte_t *ptep, pte_t pteval)
 
 	pte_page = virt_to_page(ptep);
 
-	if (!pte_page || !pfn_valid(page_to_pfn(pte_page))) {
-		native_set_pte(ptep, pteval);
-		return;
-	}
-
-	if (!pte_page->pt_replica) {
+	if (!pte_page || !pfn_valid(page_to_pfn(pte_page)) ||
+	    !pte_page->pt_replica) {
 		native_set_pte(ptep, pteval);
 		return;
 	}
@@ -67,12 +63,8 @@ void pgtable_repl_set_pmd(pmd_t *pmdp, pmd_t pmdval)
 
 	parent_page = virt_to_page(pmdp);
 
-	if (!parent_page || !pfn_valid(page_to_pfn(parent_page))) {
-		native_set_pmd(pmdp, pmdval);
-		return;
-	}
-
-	if (!parent_page->pt_replica) {
+	if (!parent_page || !pfn_valid(page_to_pfn(parent_page)) ||
+	    !parent_page->pt_replica) {
 		native_set_pmd(pmdp, pmdval);
 		return;
 	}
@@ -156,12 +148,8 @@ void pgtable_repl_set_pud(pud_t *pudp, pud_t pudval)
 
 	parent_page = virt_to_page(pudp);
 
-	if (!parent_page || !pfn_valid(page_to_pfn(parent_page))) {
-		native_set_pud(pudp, pudval);
-		return;
-	}
-
-	if (!parent_page->pt_replica) {
+	if (!parent_page || !pfn_valid(page_to_pfn(parent_page)) ||
+	    !parent_page->pt_replica) {
 		native_set_pud(pudp, pudval);
 		return;
 	}
@@ -409,10 +397,8 @@ pte_t pgtable_repl_get_pte(pte_t *ptep)
 
 	pte_page = virt_to_page(ptep);
 
-	if (!pte_page || !pfn_valid(page_to_pfn(pte_page)))
-		return __pte(pte_val(*ptep));
-
-	if (!pte_page->pt_replica)
+	if (!pte_page || !pfn_valid(page_to_pfn(pte_page)) ||
+	    !pte_page->pt_replica)
 		return __pte(pte_val(*ptep));
 
 	val = pte_val(*ptep);
@@ -454,10 +440,8 @@ pte_t pgtable_repl_ptep_get_and_clear(struct mm_struct *mm, pte_t *ptep)
 
 	pte_page = virt_to_page(ptep);
 
-	if (!pte_page || !pfn_valid(page_to_pfn(pte_page)))
-		return native_ptep_get_and_clear(ptep);
-
-	if (!pte_page->pt_replica)
+	if (!pte_page || !pfn_valid(page_to_pfn(pte_page)) ||
+	    !pte_page->pt_replica)
 		return native_ptep_get_and_clear(ptep);
 
 	offset = ((unsigned long)ptep) & ~PAGE_MASK;
@@ -592,10 +576,8 @@ pmd_t pgtable_repl_pmdp_huge_get_and_clear(struct mm_struct *mm, pmd_t *pmdp)
 
 	pmd_page = virt_to_page(pmdp);
 
-	if (!pmd_page || !pfn_valid(page_to_pfn(pmd_page)))
-		return native_pmdp_get_and_clear(pmdp);
-
-	if (!pmd_page->pt_replica)
+	if (!pmd_page || !pfn_valid(page_to_pfn(pmd_page)) ||
+	    !pmd_page->pt_replica)
 		return native_pmdp_get_and_clear(pmdp);
 
 	val = pmd_val(native_pmdp_get_and_clear(pmdp));
@@ -835,10 +817,8 @@ pmd_t pgtable_repl_get_pmd(pmd_t *pmdp)
 
 	pmd_page = virt_to_page(pmdp);
 
-	if (!pmd_page || !pfn_valid(page_to_pfn(pmd_page)))
-		return *pmdp;
-
-	if (!pmd_page->pt_replica)
+	if (!pmd_page || !pfn_valid(page_to_pfn(pmd_page)) ||
+	    !pmd_page->pt_replica)
 		return *pmdp;
 
 	val = pmd_val(*pmdp);

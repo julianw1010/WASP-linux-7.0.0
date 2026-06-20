@@ -349,10 +349,7 @@ void pgtable_repl_alloc_pte(struct mm_struct *mm, unsigned long pfn)
 
 	base_page = pfn_to_page(pfn);
 
-	if (!mm->repl_pgd_enabled)
-		return;
-
-	if (base_page->pt_replica)
+	if (!mm->repl_pgd_enabled || base_page->pt_replica)
 		return;
 
 	src_addr = page_address(base_page);
@@ -390,10 +387,7 @@ void pgtable_repl_alloc_pmd(struct mm_struct *mm, unsigned long pfn)
 
 	base_page = pfn_to_page(pfn);
 
-	if (!mm->repl_pgd_enabled)
-		return;
-
-	if (base_page->pt_replica)
+	if (!mm->repl_pgd_enabled || base_page->pt_replica)
 		return;
 
 	src_addr = page_address(base_page);
@@ -431,10 +425,7 @@ void pgtable_repl_alloc_pud(struct mm_struct *mm, unsigned long pfn)
 
 	base_page = pfn_to_page(pfn);
 
-	if (!mm->repl_pgd_enabled)
-		return;
-
-	if (base_page->pt_replica)
+	if (!mm->repl_pgd_enabled || base_page->pt_replica)
 		return;
 
 	src_addr = page_address(base_page);
@@ -466,18 +457,12 @@ void pgtable_repl_alloc_p4d(struct mm_struct *mm, unsigned long pfn)
 	int count = 0;
 	int i, ret;
 
-	if (!pgtable_l5_enabled())
-		return;
-
-	if (!mm || !pfn_valid(pfn))
+	if (!pgtable_l5_enabled() || !mm || !pfn_valid(pfn))
 		return;
 
 	base_page = pfn_to_page(pfn);
 
-	if (!mm->repl_pgd_enabled)
-		return;
-
-	if (base_page->pt_replica)
+	if (!mm->repl_pgd_enabled || base_page->pt_replica)
 		return;
 
 	src_addr = page_address(base_page);

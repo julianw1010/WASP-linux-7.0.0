@@ -11,10 +11,7 @@ void mitosis_verify_chain_integrity(struct page *primary, struct mm_struct *mm,
 	int count;
 	int pn;
 
-	if (!READ_ONCE(sysctl_mitosis_verify_enabled))
-		return;
-
-	if (!primary)
+	if (!READ_ONCE(sysctl_mitosis_verify_enabled) || !primary)
 		return;
 
 	cur = READ_ONCE(primary->pt_replica);
@@ -106,6 +103,7 @@ void mitosis_verify_chain_integrity(struct page *primary, struct mm_struct *mm,
 		}
 	}
 }
+
 
 static void verify_page_full(struct page *primary_page,
 			     struct mm_struct *mm, int level)
@@ -273,13 +271,9 @@ void mitosis_verify_tree_consistency(struct mm_struct *mm)
 	int node;
 	unsigned long cphys;
 
-	if (!READ_ONCE(sysctl_mitosis_verify_enabled))
-		return;
-
-	if (!mm || !smp_load_acquire(&mm->repl_pgd_enabled))
-		return;
-
-	if (smp_load_acquire(&mm->repl_in_progress))
+	if (!READ_ONCE(sysctl_mitosis_verify_enabled) ||
+	    !mm || !smp_load_acquire(&mm->repl_pgd_enabled) ||
+	    smp_load_acquire(&mm->repl_in_progress))
 		return;
 
 	pgd = mm->pgd;
@@ -398,6 +392,7 @@ void mitosis_verify_tree_consistency(struct mm_struct *mm)
 	}
 }
 
+
 void mitosis_verify_after_fork(struct mm_struct *child, struct mm_struct *parent)
 {
 	struct page *child_pgd_page, *parent_pgd_page;
@@ -407,13 +402,9 @@ void mitosis_verify_after_fork(struct mm_struct *child, struct mm_struct *parent
 	int gi, p4i, pui, pmi;
 	unsigned long cphys;
 
-	if (!READ_ONCE(sysctl_mitosis_verify_enabled))
-		return;
-
-	if (!child || !parent)
-		return;
-
-	if (!smp_load_acquire(&child->repl_pgd_enabled))
+	if (!READ_ONCE(sysctl_mitosis_verify_enabled) ||
+	    !child || !parent ||
+	    !smp_load_acquire(&child->repl_pgd_enabled))
 		return;
 
 	if (child->pgd == parent->pgd) {
@@ -568,18 +559,15 @@ void mitosis_verify_after_fork(struct mm_struct *child, struct mm_struct *parent
 	}
 }
 
+
 void mitosis_verify_pti_consistency(struct mm_struct *mm)
 {
 	struct page *pgd_page, *cur;
 	int idx;
 
-	if (!READ_ONCE(sysctl_mitosis_verify_enabled))
-		return;
-
-	if (!mm || !smp_load_acquire(&mm->repl_pgd_enabled))
-		return;
-
-	if (!mitosis_pti_active())
+	if (!READ_ONCE(sysctl_mitosis_verify_enabled) ||
+	    !mm || !smp_load_acquire(&mm->repl_pgd_enabled) ||
+	    !mitosis_pti_active())
 		return;
 
 	pgd_page = virt_to_page(mm->pgd);
@@ -649,10 +637,7 @@ void mitosis_verify_cache_pop(struct page *page, int node)
 	unsigned long *entries;
 	int i;
 
-	if (!READ_ONCE(sysctl_mitosis_verify_enabled))
-		return;
-
-	if (!page)
+	if (!READ_ONCE(sysctl_mitosis_verify_enabled) || !page)
 		return;
 
 	if (page_to_nid(page) != node) {
@@ -699,16 +684,10 @@ void mitosis_verify_mm_coherence(struct mm_struct *mm)
 	int i;
 	int primary_node;
 
-	if (!READ_ONCE(sysctl_mitosis_verify_enabled))
-		return;
-
-	if (!mm)
-		return;
-
-	if (!smp_load_acquire(&mm->repl_pgd_enabled))
-		return;
-
-	if (smp_load_acquire(&mm->repl_in_progress))
+	if (!READ_ONCE(sysctl_mitosis_verify_enabled) ||
+	    !mm ||
+	    !smp_load_acquire(&mm->repl_pgd_enabled) ||
+	    smp_load_acquire(&mm->repl_in_progress))
 		return;
 
 	if (nodes_empty(mm->repl_pgd_nodes)) {
@@ -814,10 +793,8 @@ void mitosis_verify_after_set_pte(pte_t *ptep, pte_t pteval)
 	unsigned long offset;
 	int pn;
 
-	if (!READ_ONCE(sysctl_mitosis_verify_enabled))
-		return;
-
-	if (!ptep || !virt_addr_valid(ptep))
+	if (!READ_ONCE(sysctl_mitosis_verify_enabled) ||
+	    !ptep || !virt_addr_valid(ptep))
 		return;
 
 	pte_page = virt_to_page(ptep);
@@ -873,10 +850,8 @@ void mitosis_verify_after_set_pmd(pmd_t *pmdp, pmd_t pmdval)
 	unsigned long entry_val;
 	int pn;
 
-	if (!READ_ONCE(sysctl_mitosis_verify_enabled))
-		return;
-
-	if (!pmdp || !virt_addr_valid(pmdp))
+	if (!READ_ONCE(sysctl_mitosis_verify_enabled) ||
+	    !pmdp || !virt_addr_valid(pmdp))
 		return;
 
 	parent_page = virt_to_page(pmdp);
@@ -947,10 +922,8 @@ void mitosis_verify_after_set_pud(pud_t *pudp, pud_t pudval)
 	unsigned long offset;
 	int pn;
 
-	if (!READ_ONCE(sysctl_mitosis_verify_enabled))
-		return;
-
-	if (!pudp || !virt_addr_valid(pudp))
+	if (!READ_ONCE(sysctl_mitosis_verify_enabled) ||
+	    !pudp || !virt_addr_valid(pudp))
 		return;
 
 	parent_page = virt_to_page(pudp);
@@ -1005,10 +978,8 @@ void mitosis_verify_after_set_p4d(p4d_t *p4dp, p4d_t p4dval)
 	unsigned long offset;
 	int pn;
 
-	if (!READ_ONCE(sysctl_mitosis_verify_enabled))
-		return;
-
-	if (!p4dp || !virt_addr_valid(p4dp))
+	if (!READ_ONCE(sysctl_mitosis_verify_enabled) ||
+	    !p4dp || !virt_addr_valid(p4dp))
 		return;
 
 	parent_page = virt_to_page(p4dp);
@@ -1061,10 +1032,8 @@ void mitosis_verify_after_set_pgd(pgd_t *pgdp, pgd_t pgdval)
 	unsigned long offset;
 	int pn;
 
-	if (!READ_ONCE(sysctl_mitosis_verify_enabled))
-		return;
-
-	if (!pgdp || !virt_addr_valid(pgdp))
+	if (!READ_ONCE(sysctl_mitosis_verify_enabled) ||
+	    !pgdp || !virt_addr_valid(pgdp))
 		return;
 
 	parent_page = virt_to_page(pgdp);
@@ -1120,10 +1089,8 @@ void mitosis_verify_after_thp_split(struct mm_struct *mm, pmd_t *pmdp)
 	unsigned long pte_phys;
 	pmd_t pmval;
 
-	if (!READ_ONCE(sysctl_mitosis_verify_enabled))
-		return;
-
-	if (!pmdp || !virt_addr_valid(pmdp))
+	if (!READ_ONCE(sysctl_mitosis_verify_enabled) ||
+	    !pmdp || !virt_addr_valid(pmdp))
 		return;
 
 	pmd_page = virt_to_page(pmdp);
@@ -1213,10 +1180,8 @@ void mitosis_verify_after_ptep_get_and_clear(pte_t *ptep)
 	struct page *pte_page, *cur;
 	unsigned long offset;
 
-	if (!READ_ONCE(sysctl_mitosis_verify_enabled))
-		return;
-
-	if (!ptep || !virt_addr_valid(ptep))
+	if (!READ_ONCE(sysctl_mitosis_verify_enabled) ||
+	    !ptep || !virt_addr_valid(ptep))
 		return;
 
 	pte_page = virt_to_page(ptep);
@@ -1256,10 +1221,8 @@ void mitosis_verify_after_ptep_set_wrprotect(pte_t *ptep)
 	struct page *pte_page, *cur;
 	unsigned long offset;
 
-	if (!READ_ONCE(sysctl_mitosis_verify_enabled))
-		return;
-
-	if (!ptep || !virt_addr_valid(ptep))
+	if (!READ_ONCE(sysctl_mitosis_verify_enabled) ||
+	    !ptep || !virt_addr_valid(ptep))
 		return;
 
 	pte_page = virt_to_page(ptep);
@@ -1298,10 +1261,8 @@ void mitosis_verify_after_pmdp_set_wrprotect(pmd_t *pmdp)
 	struct page *pmd_page, *cur;
 	unsigned long offset;
 
-	if (!READ_ONCE(sysctl_mitosis_verify_enabled))
-		return;
-
-	if (!pmdp || !virt_addr_valid(pmdp))
+	if (!READ_ONCE(sysctl_mitosis_verify_enabled) ||
+	    !pmdp || !virt_addr_valid(pmdp))
 		return;
 
 	pmd_page = virt_to_page(pmdp);
@@ -1339,10 +1300,8 @@ void mitosis_verify_after_pmdp_huge_get_and_clear(pmd_t *pmdp)
 	struct page *pmd_page, *cur;
 	unsigned long offset;
 
-	if (!READ_ONCE(sysctl_mitosis_verify_enabled))
-		return;
-
-	if (!pmdp || !virt_addr_valid(pmdp))
+	if (!READ_ONCE(sysctl_mitosis_verify_enabled) ||
+	    !pmdp || !virt_addr_valid(pmdp))
 		return;
 
 	pmd_page = virt_to_page(pmdp);
@@ -1383,10 +1342,8 @@ void mitosis_verify_after_pmdp_establish(pmd_t *pmdp, pmd_t newpmd)
 	unsigned long offset;
 	int pn;
 
-	if (!READ_ONCE(sysctl_mitosis_verify_enabled))
-		return;
-
-	if (!pmdp || !virt_addr_valid(pmdp))
+	if (!READ_ONCE(sysctl_mitosis_verify_enabled) ||
+	    !pmdp || !virt_addr_valid(pmdp))
 		return;
 
 	pmd_page = virt_to_page(pmdp);
@@ -1451,13 +1408,9 @@ void mitosis_verify_after_deposit(struct mm_struct *mm, pmd_t *pmdp,
 	struct page *pmd_page, *pte_page;
 	int pmd_node, pte_node;
 
-	if (!READ_ONCE(sysctl_mitosis_verify_enabled))
-		return;
-
-	if (!pmdp || !virt_addr_valid(pmdp) || !pgtable)
-		return;
-
-	if (!mm || !smp_load_acquire(&mm->repl_pgd_enabled))
+	if (!READ_ONCE(sysctl_mitosis_verify_enabled) ||
+	    !pmdp || !virt_addr_valid(pmdp) || !pgtable ||
+	    !mm || !smp_load_acquire(&mm->repl_pgd_enabled))
 		return;
 
 	pmd_page = virt_to_page(pmdp);
@@ -1478,13 +1431,9 @@ void mitosis_verify_after_withdraw(struct mm_struct *mm, pmd_t *pmdp,
 	struct page *pmd_page, *pte_page;
 	int pmd_node, pte_node;
 
-	if (!READ_ONCE(sysctl_mitosis_verify_enabled))
-		return;
-
-	if (!pmdp || !virt_addr_valid(pmdp))
-		return;
-
-	if (!mm || !smp_load_acquire(&mm->repl_pgd_enabled))
+	if (!READ_ONCE(sysctl_mitosis_verify_enabled) ||
+	    !pmdp || !virt_addr_valid(pmdp) ||
+	    !mm || !smp_load_acquire(&mm->repl_pgd_enabled))
 		return;
 
 	if (!pgtable) {
@@ -1517,10 +1466,8 @@ void mitosis_verify_after_ptep_clear_young(pte_t *ptep)
 	struct page *pte_page, *cur;
 	unsigned long offset;
 
-	if (!READ_ONCE(sysctl_mitosis_verify_enabled))
-		return;
-
-	if (!ptep || !virt_addr_valid(ptep))
+	if (!READ_ONCE(sysctl_mitosis_verify_enabled) ||
+	    !ptep || !virt_addr_valid(ptep))
 		return;
 
 	pte_page = virt_to_page(ptep);
@@ -1557,10 +1504,8 @@ void mitosis_verify_after_pmdp_clear_young(pmd_t *pmdp)
 	struct page *pmd_page, *cur;
 	unsigned long offset;
 
-	if (!READ_ONCE(sysctl_mitosis_verify_enabled))
-		return;
-
-	if (!pmdp || !virt_addr_valid(pmdp))
+	if (!READ_ONCE(sysctl_mitosis_verify_enabled) ||
+	    !pmdp || !virt_addr_valid(pmdp))
 		return;
 
 	pmd_page = virt_to_page(pmdp);
@@ -1599,13 +1544,9 @@ void mitosis_verify_after_repl_alloc(struct mm_struct *mm, unsigned long pfn,
 	struct page *primary, *cur;
 	int pn;
 
-	if (!READ_ONCE(sysctl_mitosis_verify_enabled))
-		return;
-
-	if (!mm || !pfn_valid(pfn))
-		return;
-
-	if (!smp_load_acquire(&mm->repl_pgd_enabled))
+	if (!READ_ONCE(sysctl_mitosis_verify_enabled) ||
+	    !mm || !pfn_valid(pfn) ||
+	    !smp_load_acquire(&mm->repl_pgd_enabled))
 		return;
 
 	primary = pfn_to_page(pfn);
@@ -1656,13 +1597,9 @@ void mitosis_verify_after_thp_collapse(struct mm_struct *mm, pmd_t *pmdp)
 	pmd_t pmval;
 	unsigned long primary_pfn;
 
-	if (!READ_ONCE(sysctl_mitosis_verify_enabled))
-		return;
-
-	if (!pmdp || !virt_addr_valid(pmdp))
-		return;
-
-	if (!mm || !smp_load_acquire(&mm->repl_pgd_enabled))
+	if (!READ_ONCE(sysctl_mitosis_verify_enabled) ||
+	    !pmdp || !virt_addr_valid(pmdp) ||
+	    !mm || !smp_load_acquire(&mm->repl_pgd_enabled))
 		return;
 
 	pmd_page = virt_to_page(pmdp);
@@ -1829,10 +1766,8 @@ void mitosis_verify_after_enable(struct mm_struct *mm)
 	struct page *pgd_page;
 	int node;
 
-	if (!READ_ONCE(sysctl_mitosis_verify_enabled))
-		return;
-
-	if (!mm || !smp_load_acquire(&mm->repl_pgd_enabled))
+	if (!READ_ONCE(sysctl_mitosis_verify_enabled) ||
+	    !mm || !smp_load_acquire(&mm->repl_pgd_enabled))
 		return;
 
 	pgd_page = virt_to_page(mm->pgd);
@@ -1947,10 +1882,7 @@ void mitosis_verify_after_disable(struct mm_struct *mm)
 	struct page *pgd_page;
 	int i;
 
-	if (!READ_ONCE(sysctl_mitosis_verify_enabled))
-		return;
-
-	if (!mm)
+	if (!READ_ONCE(sysctl_mitosis_verify_enabled) || !mm)
 		return;
 
 	if (mm->repl_pgd_enabled) {
@@ -1990,13 +1922,9 @@ void mitosis_verify_after_cr3_switch(struct mm_struct *mm)
 	struct page *cr3_page;
 	int cr3_node, local_node, target_node;
 
-	if (!READ_ONCE(sysctl_mitosis_verify_enabled))
-		return;
-
-	if (!mm || !smp_load_acquire(&mm->repl_pgd_enabled))
-		return;
-
-	if (smp_load_acquire(&mm->repl_in_progress))
+	if (!READ_ONCE(sysctl_mitosis_verify_enabled) ||
+	    !mm || !smp_load_acquire(&mm->repl_pgd_enabled) ||
+	    smp_load_acquire(&mm->repl_in_progress))
 		return;
 
 	cr3_pa = __read_cr3() & PAGE_MASK;
@@ -2033,10 +1961,7 @@ void mitosis_verify_after_cr3_switch(struct mm_struct *mm)
 
 void mitosis_verify_after_free_replicas(struct page *primary, int level)
 {
-	if (!READ_ONCE(sysctl_mitosis_verify_enabled))
-		return;
-
-	if (!primary)
+	if (!READ_ONCE(sysctl_mitosis_verify_enabled) || !primary)
 		return;
 
 	if (READ_ONCE(primary->pt_replica)) {
@@ -2058,16 +1983,10 @@ void mitosis_verify_fault_locality(struct mm_struct *mm, unsigned long address)
 	unsigned long cphys;
 	int cn;
 
-	if (!READ_ONCE(sysctl_mitosis_verify_enabled))
-		return;
-
-	if (!mm || !smp_load_acquire(&mm->repl_pgd_enabled))
-		return;
-
-	if (smp_load_acquire(&mm->repl_in_progress))
-		return;
-
-	if (address >= TASK_SIZE)
+	if (!READ_ONCE(sysctl_mitosis_verify_enabled) ||
+	    !mm || !smp_load_acquire(&mm->repl_pgd_enabled) ||
+	    smp_load_acquire(&mm->repl_in_progress) ||
+	    address >= TASK_SIZE)
 		return;
 
 	node = numa_node_id();
