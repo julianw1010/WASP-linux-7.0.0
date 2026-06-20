@@ -20,8 +20,6 @@
 
 int sysctl_mitosis_inherit = 1;
 
-static DEFINE_MUTEX(global_repl_mutex);
-
 struct cr3_switch_info {
 	struct mm_struct *mm;
 	pgd_t *original_pgd;
@@ -465,7 +463,6 @@ int pgtable_repl_enable(struct mm_struct *mm)
 	for (i = 0; i < NUMA_NODE_COUNT; i++)
 		mm->repl_steering[i] = -1;
 
-	mutex_lock(&global_repl_mutex);
 	mutex_lock(&mm->repl_mutex);
 
 	if (mm->repl_pgd_enabled) {
@@ -532,7 +529,6 @@ int pgtable_repl_enable(struct mm_struct *mm)
 	pgtable_repl_force_steering_switch(mm, NULL);
 
 	mutex_unlock(&mm->repl_mutex);
-	mutex_unlock(&global_repl_mutex);
 
 	pr_info("MITOSIS: Enabled page table replication for mm %px on %d nodes\n", mm, count);
 
@@ -542,7 +538,6 @@ int pgtable_repl_enable(struct mm_struct *mm)
 
 out_unlock:
 	mutex_unlock(&mm->repl_mutex);
-	mutex_unlock(&global_repl_mutex);
 	return ret;
 }
 
@@ -588,14 +583,12 @@ void pgtable_repl_disable(struct mm_struct *mm)
 	if (!mm || mm == &init_mm)
 		return;
 
-	mutex_lock(&global_repl_mutex);
+	mutex_lock(&mm->repl_mutex);
 
 	if (!mm->repl_pgd_enabled && nodes_empty(mm->repl_pgd_nodes)) {
-		mutex_unlock(&global_repl_mutex);
+		mutex_unlock(&mm->repl_mutex);
 		return;
 	}
-
-	mutex_lock(&mm->repl_mutex);
 
 	if (!mm->original_pgd)
 		mm->original_pgd = mm->pgd;
@@ -735,8 +728,6 @@ void pgtable_repl_disable(struct mm_struct *mm)
 	mitosis_verify_after_disable(mm);
 
 	mutex_unlock(&mm->repl_mutex);
-	mutex_unlock(&global_repl_mutex);
-	synchronize_rcu();
 }
 
 int mitosis_inherit_sysctl_handler(struct ctl_table *table, int write,

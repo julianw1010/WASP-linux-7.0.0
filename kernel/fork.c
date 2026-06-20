@@ -1121,7 +1121,6 @@ static struct mm_struct *mm_init(struct mm_struct *mm, struct task_struct *p,
 	mm->cache_only_mode = false;
 	nodes_clear(mm->repl_pgd_nodes);
 	mutex_init(&mm->repl_mutex);
-	spin_lock_init(&mm->repl_alloc_lock);
 
 	memset(mm->pgd_replicas, 0, sizeof(mm->pgd_replicas));
 	mm->original_pgd = NULL;
@@ -1611,13 +1610,11 @@ static int copy_mm(u64 clone_flags, struct task_struct *tsk)
 	} else {
 		bool parent_had_mitosis = false;
 
-		mutex_lock(&oldmm->repl_mutex);
-		if (oldmm->repl_pgd_enabled &&
+		if (smp_load_acquire(&oldmm->repl_pgd_enabled) &&
 		    !nodes_empty(oldmm->repl_pgd_nodes) &&
 		    nodes_weight(oldmm->repl_pgd_nodes) >= 2) {
 			parent_had_mitosis = true;
 		}
-		mutex_unlock(&oldmm->repl_mutex);
 
 		mm = dup_mm(tsk, oldmm);
 		if (!mm)
