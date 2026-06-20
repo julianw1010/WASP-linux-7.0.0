@@ -34,7 +34,7 @@ static int mitosis_cache_open(struct inode *inode, struct file *file)
 }
 
 static ssize_t mitosis_cache_write(struct file *file, const char __user *ubuf,
-				size_t count, loff_t *ppos)
+				   size_t count, loff_t *ppos)
 {
 	char buf[32];
 	size_t len;
@@ -117,7 +117,7 @@ static int mitosis_inherit_open(struct inode *inode, struct file *file)
 }
 
 static ssize_t mitosis_inherit_write(struct file *file, const char __user *ubuf,
-				 size_t count, loff_t *ppos)
+				     size_t count, loff_t *ppos)
 {
 	char buf[32];
 	size_t len;
@@ -199,7 +199,7 @@ static int __init mitosis_proc_init(void)
 		goto fail;
 
 	if (!proc_create("inherit", 0644, mitosis_dir, &mitosis_inherit_ops))
-    		goto fail;
+		goto fail;
 
 	if (!proc_create("verify", 0644, mitosis_dir, &mitosis_verify_ops))
 		goto fail;

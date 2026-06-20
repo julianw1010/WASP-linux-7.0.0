@@ -111,7 +111,6 @@ int mitosis_cache_drain_node(int node)
 }
 EXPORT_SYMBOL(mitosis_cache_drain_node);
 
-
 int mitosis_cache_drain_all(void)
 {
 	int node, total = 0;

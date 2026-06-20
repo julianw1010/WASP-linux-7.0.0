@@ -23,744 +23,761 @@ int sysctl_mitosis_inherit = 1;
 static DEFINE_MUTEX(global_repl_mutex);
 
 struct cr3_switch_info {
-    struct mm_struct *mm;
-    pgd_t *original_pgd;
-    int initiating_cpu;
+	struct mm_struct *mm;
+	pgd_t *original_pgd;
+	int initiating_cpu;
 };
 
 bool link_page_replicas(struct page **pages, int count)
 {
-    int i;
+	int i;
 
-    if (!pages || count < 2)
-        return count < 2;
+	if (!pages || count < 2)
+		return count < 2;
 
-    for (i = 0; i < count; i++)
-        WRITE_ONCE(pages[i]->pt_replica, NULL);
-    smp_wmb();
+	for (i = 0; i < count; i++)
+		WRITE_ONCE(pages[i]->pt_replica, NULL);
+	smp_wmb();
 
-    for (i = 0; i < count - 1; i++)
-        WRITE_ONCE(pages[i]->pt_replica, pages[i + 1]);
-    WRITE_ONCE(pages[count - 1]->pt_replica, pages[0]);
+	for (i = 0; i < count - 1; i++)
+		WRITE_ONCE(pages[i]->pt_replica, pages[i + 1]);
+	WRITE_ONCE(pages[count - 1]->pt_replica, pages[0]);
 
-    smp_mb();
-    return true;
+	smp_mb();
+	return true;
 }
 
 struct page *get_replica_for_node(struct page *base, int target_node)
 {
-    struct page *page;
-    struct page *start_page;
+	struct page *page;
+	struct page *start_page;
 
-    if (!base)
-        return NULL;
+	if (!base)
+		return NULL;
 
-    if (page_to_nid(base) == target_node)
-        return base;
+	if (page_to_nid(base) == target_node)
+		return base;
 
-    page = READ_ONCE(base->pt_replica);
-    if (!page)
-        return NULL;
+	page = READ_ONCE(base->pt_replica);
+	if (!page)
+		return NULL;
 
-    start_page = base;
+	start_page = base;
 
-    while (page != start_page) {
-        if (page_to_nid(page) == target_node)
-            return page;
-        page = READ_ONCE(page->pt_replica);
-        if (!page)
-            return NULL;
-    }
+	while (page != start_page) {
+		if (page_to_nid(page) == target_node)
+			return page;
+		page = READ_ONCE(page->pt_replica);
+		if (!page)
+			return NULL;
+	}
 
-    return NULL;
+	return NULL;
 }
 
 static void replicate_existing_pagetables_phase1(struct mm_struct *mm)
 {
-    pgd_t *pgd;
-    int pgd_idx, p4d_idx, pud_idx, pmd_idx;
+	pgd_t *pgd;
+	int pgd_idx, p4d_idx, pud_idx, pmd_idx;
 
-    if (!mm || !mm->repl_in_progress)
-        return;
+	if (!mm || !mm->repl_in_progress)
+		return;
 
-    pgd = mm->pgd;
+	pgd = mm->pgd;
 
-    for (pgd_idx = 0; pgd_idx < KERNEL_PGD_BOUNDARY; pgd_idx++) {
-        pgd_t pgdval;
-        p4d_t *p4d_base;
+	for (pgd_idx = 0; pgd_idx < KERNEL_PGD_BOUNDARY; pgd_idx++) {
+		pgd_t pgdval;
+		p4d_t *p4d_base;
 
-        if (!mm->repl_in_progress)
-            return;
+		if (!mm->repl_in_progress)
+			return;
 
-        pgdval = READ_ONCE(pgd[pgd_idx]);
-        if (pgd_none(pgdval) || !pgd_present(pgdval))
-            continue;
+		pgdval = READ_ONCE(pgd[pgd_idx]);
+		if (pgd_none(pgdval) || !pgd_present(pgdval))
+			continue;
 
-        if (pgtable_l5_enabled()) {
-            unsigned long child_phys = pgd_val(pgdval) & PTE_PFN_MASK;
-            if (child_phys) {
-                struct page *child_page = pfn_to_page(child_phys >> PAGE_SHIFT);
+		if (pgtable_l5_enabled()) {
+			unsigned long child_phys = pgd_val(pgdval) & PTE_PFN_MASK;
 
-                if (mm->repl_in_progress && !READ_ONCE(child_page->pt_replica)) {
-                    struct page *pages[NUMA_NODE_COUNT];
-                    int count = 0;
-                    int i, ret;
-                    void *src;
+			if (child_phys) {
+				struct page *child_page = pfn_to_page(child_phys >> PAGE_SHIFT);
 
-                    ret = alloc_p4d_replicas(child_page, mm, pages, &count);
-                    if (ret == 0 && count >= 2) {
-                        src = page_address(child_page);
-                        for (i = 1; i < count; i++) {
-                            unsigned long *entry;
-                            int j;
+				if (mm->repl_in_progress && !READ_ONCE(child_page->pt_replica)) {
+					struct page *pages[NUMA_NODE_COUNT];
+					int count = 0;
+					int i, ret;
+					void *src;
 
-                            memcpy(page_address(pages[i]), src, PAGE_SIZE);
-                            entry = (unsigned long *)page_address(pages[i]);
-                            for (j = 0; j < PAGE_SIZE / sizeof(unsigned long); j++) {
-                                if (entry[j] & _PAGE_PRESENT)
-                                    entry[j] &= ~_PAGE_ACCESSED;
-                            }
-                        }
-                        smp_wmb();
-                        BUG_ON(!link_page_replicas(pages, count));
-                        smp_mb();
-                        mitosis_verify_chain_integrity(child_page, mm, -1);
-                    }
-                }
-            }
-        }
+					ret = alloc_p4d_replicas(child_page, mm, pages, &count);
+					if (ret == 0 && count >= 2) {
+						src = page_address(child_page);
+						for (i = 1; i < count; i++) {
+							unsigned long *entry;
+							int j;
 
-        p4d_base = p4d_offset(&pgd[pgd_idx], 0);
+							memcpy(page_address(pages[i]), src, PAGE_SIZE);
+							entry = (unsigned long *)page_address(pages[i]);
+							for (j = 0; j < PAGE_SIZE / sizeof(unsigned long); j++) {
+								if (entry[j] & _PAGE_PRESENT)
+									entry[j] &= ~_PAGE_ACCESSED;
+							}
+						}
+						smp_wmb();
+						BUG_ON(!link_page_replicas(pages, count));
+						smp_mb();
+						mitosis_verify_chain_integrity(child_page, mm, -1);
+					}
+				}
+			}
+		}
 
-        for (p4d_idx = 0; p4d_idx < PTRS_PER_P4D; p4d_idx++) {
-            p4d_t p4dval;
-            pud_t *pud_base;
+		p4d_base = p4d_offset(&pgd[pgd_idx], 0);
 
-            if (!mm->repl_in_progress)
-                return;
+		for (p4d_idx = 0; p4d_idx < PTRS_PER_P4D; p4d_idx++) {
+			p4d_t p4dval;
+			pud_t *pud_base;
 
-            p4dval = READ_ONCE(p4d_base[p4d_idx]);
-            if (p4d_none(p4dval) || !p4d_present(p4dval))
-                continue;
+			if (!mm->repl_in_progress)
+				return;
 
-            {
-                unsigned long pud_phys = p4d_val(p4dval) & PTE_PFN_MASK;
-                if (pud_phys) {
-                    struct page *pud_page = pfn_to_page(pud_phys >> PAGE_SHIFT);
+			p4dval = READ_ONCE(p4d_base[p4d_idx]);
+			if (p4d_none(p4dval) || !p4d_present(p4dval))
+				continue;
 
-                    if (mm->repl_in_progress && !READ_ONCE(pud_page->pt_replica)) {
-                        struct page *pages[NUMA_NODE_COUNT];
-                        int count = 0;
-                        int i, ret;
-                        void *src;
+			{
+				unsigned long pud_phys = p4d_val(p4dval) & PTE_PFN_MASK;
 
-                        ret = alloc_pud_replicas(pud_page, mm, pages, &count);
-                        if (ret == 0 && count >= 2) {
-                            src = page_address(pud_page);
-                            for (i = 1; i < count; i++) {
-                                unsigned long *entry;
-                                int j;
+				if (pud_phys) {
+					struct page *pud_page = pfn_to_page(pud_phys >> PAGE_SHIFT);
 
-                                memcpy(page_address(pages[i]), src, PAGE_SIZE);
-                                entry = (unsigned long *)page_address(pages[i]);
-                                for (j = 0; j < PAGE_SIZE / sizeof(unsigned long); j++) {
-                                    if (entry[j] & _PAGE_PRESENT)
-                                        entry[j] &= ~_PAGE_ACCESSED;
-                                }
-                            }
-                            smp_wmb();
-                            BUG_ON(!link_page_replicas(pages, count));
-                            smp_mb();
-                            mitosis_verify_chain_integrity(pud_page, mm, -1);
-                        }
-                    }
-                }
-            }
+					if (mm->repl_in_progress && !READ_ONCE(pud_page->pt_replica)) {
+						struct page *pages[NUMA_NODE_COUNT];
+						int count = 0;
+						int i, ret;
+						void *src;
 
-            pud_base = pud_offset(&p4d_base[p4d_idx], 0);
+						ret = alloc_pud_replicas(pud_page, mm, pages, &count);
+						if (ret == 0 && count >= 2) {
+							src = page_address(pud_page);
+							for (i = 1; i < count; i++) {
+								unsigned long *entry;
+								int j;
 
-            for (pud_idx = 0; pud_idx < PTRS_PER_PUD; pud_idx++) {
-                pud_t pudval;
-                pmd_t *pmd_base;
+								memcpy(page_address(pages[i]), src, PAGE_SIZE);
+								entry = (unsigned long *)page_address(pages[i]);
+								for (j = 0; j < PAGE_SIZE / sizeof(unsigned long); j++) {
+									if (entry[j] & _PAGE_PRESENT)
+										entry[j] &= ~_PAGE_ACCESSED;
+								}
+							}
+							smp_wmb();
+							BUG_ON(!link_page_replicas(pages, count));
+							smp_mb();
+							mitosis_verify_chain_integrity(pud_page, mm, -1);
+						}
+					}
+				}
+			}
 
-                if (!mm->repl_in_progress)
-                    return;
+			pud_base = pud_offset(&p4d_base[p4d_idx], 0);
 
-                pudval = READ_ONCE(pud_base[pud_idx]);
-                if (pud_none(pudval) || !pud_present(pudval) || pud_trans_huge(pudval))
-                    continue;
+			for (pud_idx = 0; pud_idx < PTRS_PER_PUD; pud_idx++) {
+				pud_t pudval;
+				pmd_t *pmd_base;
 
-                {
-                    unsigned long pmd_phys = pud_val(pudval) & PTE_PFN_MASK;
-                    if (pmd_phys) {
-                        struct page *pmd_page = pfn_to_page(pmd_phys >> PAGE_SHIFT);
+				if (!mm->repl_in_progress)
+					return;
 
-                        if (mm->repl_in_progress && !READ_ONCE(pmd_page->pt_replica)) {
-                            struct page *pages[NUMA_NODE_COUNT];
-                            int count = 0;
-                            int i, ret;
-                            void *src;
+				pudval = READ_ONCE(pud_base[pud_idx]);
+				if (pud_none(pudval) || !pud_present(pudval) || pud_trans_huge(pudval))
+					continue;
 
-                            ret = alloc_pmd_replicas(pmd_page, mm, pages, &count);
-                            if (ret == 0 && count >= 2) {
-                                src = page_address(pmd_page);
-                                for (i = 1; i < count; i++) {
-                                    unsigned long *entry;
-                                    int j;
+				{
+					unsigned long pmd_phys = pud_val(pudval) & PTE_PFN_MASK;
 
-                                    memcpy(page_address(pages[i]), src, PAGE_SIZE);
-                                    entry = (unsigned long *)page_address(pages[i]);
-                                    for (j = 0; j < PAGE_SIZE / sizeof(unsigned long); j++) {
-                                        if (entry[j] & _PAGE_PRESENT)
-                                            entry[j] &= ~_PAGE_ACCESSED;
-                                    }
-                                }
-                                smp_wmb();
-                                BUG_ON(!link_page_replicas(pages, count));
-                                smp_mb();
-                                mitosis_verify_chain_integrity(pmd_page, mm, -1);
-                            }
-                        }
-                    }
-                }
+					if (pmd_phys) {
+						struct page *pmd_page = pfn_to_page(pmd_phys >> PAGE_SHIFT);
 
-                pmd_base = pmd_offset(&pud_base[pud_idx], 0);
+						if (mm->repl_in_progress && !READ_ONCE(pmd_page->pt_replica)) {
+							struct page *pages[NUMA_NODE_COUNT];
+							int count = 0;
+							int i, ret;
+							void *src;
 
-                for (pmd_idx = 0; pmd_idx < PTRS_PER_PMD; pmd_idx++) {
-                    pmd_t pmdval;
+							ret = alloc_pmd_replicas(pmd_page, mm, pages, &count);
+							if (ret == 0 && count >= 2) {
+								src = page_address(pmd_page);
+								for (i = 1; i < count; i++) {
+									unsigned long *entry;
+									int j;
 
-                    if (!mm->repl_in_progress)
-                        return;
+									memcpy(page_address(pages[i]), src, PAGE_SIZE);
+									entry = (unsigned long *)page_address(pages[i]);
+									for (j = 0; j < PAGE_SIZE / sizeof(unsigned long); j++) {
+										if (entry[j] & _PAGE_PRESENT)
+											entry[j] &= ~_PAGE_ACCESSED;
+									}
+								}
+								smp_wmb();
+								BUG_ON(!link_page_replicas(pages, count));
+								smp_mb();
+								mitosis_verify_chain_integrity(pmd_page, mm, -1);
+							}
+						}
+					}
+				}
 
-                    pmdval = READ_ONCE(pmd_base[pmd_idx]);
-                    if (pmd_none(pmdval) || !pmd_present(pmdval) || pmd_trans_huge(pmdval))
-                        continue;
+				pmd_base = pmd_offset(&pud_base[pud_idx], 0);
 
-                    {
-                        unsigned long pte_phys = pmd_val(pmdval) & PTE_PFN_MASK;
-                        if (pte_phys) {
-                            struct page *pte_page = pfn_to_page(pte_phys >> PAGE_SHIFT);
+				for (pmd_idx = 0; pmd_idx < PTRS_PER_PMD; pmd_idx++) {
+					pmd_t pmdval;
 
-                            if (mm->repl_in_progress && !READ_ONCE(pte_page->pt_replica)) {
-                                struct page *pages[NUMA_NODE_COUNT];
-                                int count = 0;
-                                int i, ret;
-                                void *src;
+					if (!mm->repl_in_progress)
+						return;
 
-                                ret = alloc_pte_replicas(pte_page, mm, pages, &count);
-                                if (ret == 0 && count >= 2) {
-                                    src = page_address(pte_page);
-                                    for (i = 1; i < count; i++) {
-                                        unsigned long *entry;
-                                        int j;
+					pmdval = READ_ONCE(pmd_base[pmd_idx]);
+					if (pmd_none(pmdval) || !pmd_present(pmdval) || pmd_trans_huge(pmdval))
+						continue;
 
-                                        memcpy(page_address(pages[i]), src, PAGE_SIZE);
-                                        entry = (unsigned long *)page_address(pages[i]);
-                                        for (j = 0; j < PAGE_SIZE / sizeof(unsigned long); j++) {
-                                            if (entry[j] & _PAGE_PRESENT)
-                                                entry[j] &= ~_PAGE_ACCESSED;
-                                        }
-                                    }
-                                    smp_wmb();
-                                    BUG_ON(!link_page_replicas(pages, count));
-                                    smp_mb();
-                                    mitosis_verify_chain_integrity(pte_page, mm, -1);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
+					{
+						unsigned long pte_phys = pmd_val(pmdval) & PTE_PFN_MASK;
 
-    smp_mb();
+						if (pte_phys) {
+							struct page *pte_page = pfn_to_page(pte_phys >> PAGE_SHIFT);
+
+							if (mm->repl_in_progress && !READ_ONCE(pte_page->pt_replica)) {
+								struct page *pages[NUMA_NODE_COUNT];
+								int count = 0;
+								int i, ret;
+								void *src;
+
+								ret = alloc_pte_replicas(pte_page, mm, pages, &count);
+								if (ret == 0 && count >= 2) {
+									src = page_address(pte_page);
+									for (i = 1; i < count; i++) {
+										unsigned long *entry;
+										int j;
+
+										memcpy(page_address(pages[i]), src, PAGE_SIZE);
+										entry = (unsigned long *)page_address(pages[i]);
+										for (j = 0; j < PAGE_SIZE / sizeof(unsigned long); j++) {
+											if (entry[j] & _PAGE_PRESENT)
+												entry[j] &= ~_PAGE_ACCESSED;
+										}
+									}
+									smp_wmb();
+									BUG_ON(!link_page_replicas(pages, count));
+									smp_mb();
+									mitosis_verify_chain_integrity(pte_page, mm, -1);
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	smp_mb();
 }
 
 static void replicate_existing_pagetables_phase2(struct mm_struct *mm)
 {
-    pgd_t *pgd;
-    struct page *pgd_page;
-    int node;
-    int primary_node;
+	pgd_t *pgd;
+	struct page *pgd_page;
+	int node;
+	int primary_node;
 
-    if (!mm || !mm->repl_in_progress)
-        return;
+	if (!mm || !mm->repl_in_progress)
+		return;
 
-    pgd = mm->pgd;
-    pgd_page = virt_to_page(pgd);
-    primary_node = page_to_nid(pgd_page);
+	pgd = mm->pgd;
+	pgd_page = virt_to_page(pgd);
+	primary_node = page_to_nid(pgd_page);
 
-    if (!READ_ONCE(pgd_page->pt_replica))
-        return;
+	if (!READ_ONCE(pgd_page->pt_replica))
+		return;
 
-    for_each_node_mask(node, mm->repl_pgd_nodes) {
-        pgd_t *node_pgd;
-        struct page *node_pgd_page;
-        int pgd_idx;
+	for_each_node_mask(node, mm->repl_pgd_nodes) {
+		pgd_t *node_pgd;
+		struct page *node_pgd_page;
+		int pgd_idx;
 
-        if (!mm->repl_in_progress)
-            return;
+		if (!mm->repl_in_progress)
+			return;
 
-        node_pgd_page = get_replica_for_node(pgd_page, node);
-        if (!node_pgd_page || page_to_nid(node_pgd_page) != node)
-            continue;
+		node_pgd_page = get_replica_for_node(pgd_page, node);
+		if (!node_pgd_page || page_to_nid(node_pgd_page) != node)
+			continue;
 
-        node_pgd = page_address(node_pgd_page);
+		node_pgd = page_address(node_pgd_page);
 
-        for (pgd_idx = 0; pgd_idx < KERNEL_PGD_BOUNDARY; pgd_idx++) {
-            pgd_t pgdval;
-            p4d_t *node_p4d_base;
-            unsigned long child_phys;
-            struct page *child_page;
-            int p4d_idx;
+		for (pgd_idx = 0; pgd_idx < KERNEL_PGD_BOUNDARY; pgd_idx++) {
+			pgd_t pgdval;
+			p4d_t *node_p4d_base;
+			unsigned long child_phys;
+			struct page *child_page;
+			int p4d_idx;
 
-            if (!mm->repl_in_progress)
-                return;
+			if (!mm->repl_in_progress)
+				return;
 
-            pgdval = READ_ONCE(node_pgd[pgd_idx]);
-            if (pgd_none(pgdval) || !pgd_present(pgdval))
-                continue;
+			pgdval = READ_ONCE(node_pgd[pgd_idx]);
+			if (pgd_none(pgdval) || !pgd_present(pgdval))
+				continue;
 
-            child_phys = pgd_val(pgdval) & PTE_PFN_MASK;
-            if (child_phys) {
-                child_page = pfn_to_page(child_phys >> PAGE_SHIFT);
-                if (READ_ONCE(child_page->pt_replica)) {
-                    struct page *local_child = get_replica_for_node(child_page, node);
-                    if (local_child && page_to_nid(local_child) == node) {
-                        unsigned long new_phys = __pa(page_address(local_child));
-                        pgdval_t new_val = new_phys | (pgd_val(pgdval) & ~PTE_PFN_MASK);
-                        WRITE_ONCE(node_pgd[pgd_idx], __pgd(new_val));
+			child_phys = pgd_val(pgdval) & PTE_PFN_MASK;
+			if (child_phys) {
+				child_page = pfn_to_page(child_phys >> PAGE_SHIFT);
+				if (READ_ONCE(child_page->pt_replica)) {
+					struct page *local_child = get_replica_for_node(child_page, node);
 
-                        if (mitosis_pti_active()) {
-                            pgd_t *user_entry = mitosis_get_user_pgd_entry(&node_pgd[pgd_idx]);
-                            if (user_entry) {
-                                pgdval_t user_flags = pgd_val(*user_entry) & ~PTE_PFN_MASK;
-                                WRITE_ONCE(*user_entry, __pgd(new_phys | user_flags));
-                            }
-                        }
-                    }
-                }
-            }
+					if (local_child && page_to_nid(local_child) == node) {
+						unsigned long new_phys = __pa(page_address(local_child));
+						pgdval_t new_val = new_phys | (pgd_val(pgdval) & ~PTE_PFN_MASK);
 
-            node_p4d_base = p4d_offset(&node_pgd[pgd_idx], 0);
+						WRITE_ONCE(node_pgd[pgd_idx], __pgd(new_val));
 
-            for (p4d_idx = 0; p4d_idx < PTRS_PER_P4D; p4d_idx++) {
-                p4d_t p4dval;
-                pud_t *node_pud_base;
-                int pud_idx;
+						if (mitosis_pti_active()) {
+							pgd_t *user_entry = mitosis_get_user_pgd_entry(&node_pgd[pgd_idx]);
 
-                if (!mm->repl_in_progress)
-                    return;
+							if (user_entry) {
+								pgdval_t user_flags = pgd_val(*user_entry) & ~PTE_PFN_MASK;
 
-                p4dval = READ_ONCE(node_p4d_base[p4d_idx]);
-                if (p4d_none(p4dval) || !p4d_present(p4dval))
-                    continue;
+								WRITE_ONCE(*user_entry, __pgd(new_phys | user_flags));
+							}
+						}
+					}
+				}
+			}
 
-                child_phys = p4d_val(p4dval) & PTE_PFN_MASK;
-                if (child_phys) {
-                    child_page = pfn_to_page(child_phys >> PAGE_SHIFT);
-                    if (READ_ONCE(child_page->pt_replica)) {
-                        struct page *local_child = get_replica_for_node(child_page, node);
-                        if (local_child && page_to_nid(local_child) == node) {
-                            unsigned long new_phys = __pa(page_address(local_child));
-                            p4dval_t new_val = new_phys | (p4d_val(p4dval) & ~PTE_PFN_MASK);
-                            WRITE_ONCE(node_p4d_base[p4d_idx], __p4d(new_val));
-                        }
-                    }
-                }
+			node_p4d_base = p4d_offset(&node_pgd[pgd_idx], 0);
 
-                node_pud_base = pud_offset(&node_p4d_base[p4d_idx], 0);
+			for (p4d_idx = 0; p4d_idx < PTRS_PER_P4D; p4d_idx++) {
+				p4d_t p4dval;
+				pud_t *node_pud_base;
+				int pud_idx;
 
-                for (pud_idx = 0; pud_idx < PTRS_PER_PUD; pud_idx++) {
-                    pud_t pudval;
-                    pmd_t *node_pmd_base;
-                    int pmd_idx;
+				if (!mm->repl_in_progress)
+					return;
 
-                    if (!mm->repl_in_progress)
-                        return;
+				p4dval = READ_ONCE(node_p4d_base[p4d_idx]);
+				if (p4d_none(p4dval) || !p4d_present(p4dval))
+					continue;
 
-                    pudval = READ_ONCE(node_pud_base[pud_idx]);
-                    if (pud_none(pudval) || !pud_present(pudval) || pud_trans_huge(pudval))
-                        continue;
+				child_phys = p4d_val(p4dval) & PTE_PFN_MASK;
+				if (child_phys) {
+					child_page = pfn_to_page(child_phys >> PAGE_SHIFT);
+					if (READ_ONCE(child_page->pt_replica)) {
+						struct page *local_child = get_replica_for_node(child_page, node);
 
-                    child_phys = pud_val(pudval) & PTE_PFN_MASK;
-                    if (child_phys) {
-                        child_page = pfn_to_page(child_phys >> PAGE_SHIFT);
-                        if (READ_ONCE(child_page->pt_replica)) {
-                            struct page *local_child = get_replica_for_node(child_page, node);
-                            if (local_child && page_to_nid(local_child) == node) {
-                                unsigned long new_phys = __pa(page_address(local_child));
-                                pudval_t new_val = new_phys | (pud_val(pudval) & ~PTE_PFN_MASK);
+						if (local_child && page_to_nid(local_child) == node) {
+							unsigned long new_phys = __pa(page_address(local_child));
+							p4dval_t new_val = new_phys | (p4d_val(p4dval) & ~PTE_PFN_MASK);
 
-                                if (node == primary_node &&
-                                    local_child != child_page) {
-                                    struct ptdesc *orig_ptdesc = page_ptdesc(child_page);
-                                    struct ptdesc *local_ptdesc = page_ptdesc(local_child);
-                                    if (orig_ptdesc->pmd_huge_pte &&
-                                        !local_ptdesc->pmd_huge_pte) {
-                                        local_ptdesc->pmd_huge_pte = orig_ptdesc->pmd_huge_pte;
-                                        orig_ptdesc->pmd_huge_pte = NULL;
-                                    }
-                                }
+							WRITE_ONCE(node_p4d_base[p4d_idx], __p4d(new_val));
+						}
+					}
+				}
 
-                                WRITE_ONCE(node_pud_base[pud_idx], __pud(new_val));
-                            }
-                        }
-                    }
+				node_pud_base = pud_offset(&node_p4d_base[p4d_idx], 0);
 
-                    node_pmd_base = pmd_offset(&node_pud_base[pud_idx], 0);
+				for (pud_idx = 0; pud_idx < PTRS_PER_PUD; pud_idx++) {
+					pud_t pudval;
+					pmd_t *node_pmd_base;
+					int pmd_idx;
 
-                    for (pmd_idx = 0; pmd_idx < PTRS_PER_PMD; pmd_idx++) {
-                        pmd_t pmdval;
+					if (!mm->repl_in_progress)
+						return;
 
-                        if (!mm->repl_in_progress)
-                            return;
+					pudval = READ_ONCE(node_pud_base[pud_idx]);
+					if (pud_none(pudval) || !pud_present(pudval) || pud_trans_huge(pudval))
+						continue;
 
-                        pmdval = READ_ONCE(node_pmd_base[pmd_idx]);
-                        if (pmd_none(pmdval) || !pmd_present(pmdval) || pmd_trans_huge(pmdval))
-                            continue;
+					child_phys = pud_val(pudval) & PTE_PFN_MASK;
+					if (child_phys) {
+						child_page = pfn_to_page(child_phys >> PAGE_SHIFT);
+						if (READ_ONCE(child_page->pt_replica)) {
+							struct page *local_child = get_replica_for_node(child_page, node);
 
-                        child_phys = pmd_val(pmdval) & PTE_PFN_MASK;
-                        if (child_phys) {
-                            child_page = pfn_to_page(child_phys >> PAGE_SHIFT);
-                            if (READ_ONCE(child_page->pt_replica)) {
-                                struct page *local_child = get_replica_for_node(child_page, node);
-                                if (local_child && page_to_nid(local_child) == node) {
-                                    unsigned long new_phys = __pa(page_address(local_child));
-                                    pmdval_t new_val = new_phys | (pmd_val(pmdval) & ~PTE_PFN_MASK);
-                                    WRITE_ONCE(node_pmd_base[pmd_idx], __pmd(new_val));
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
+							if (local_child && page_to_nid(local_child) == node) {
+								unsigned long new_phys = __pa(page_address(local_child));
+								pudval_t new_val = new_phys | (pud_val(pudval) & ~PTE_PFN_MASK);
 
-    smp_mb();
+								if (node == primary_node &&
+								    local_child != child_page) {
+									struct ptdesc *orig_ptdesc = page_ptdesc(child_page);
+									struct ptdesc *local_ptdesc = page_ptdesc(local_child);
+
+									if (orig_ptdesc->pmd_huge_pte &&
+									    !local_ptdesc->pmd_huge_pte) {
+										local_ptdesc->pmd_huge_pte = orig_ptdesc->pmd_huge_pte;
+										orig_ptdesc->pmd_huge_pte = NULL;
+									}
+								}
+
+								WRITE_ONCE(node_pud_base[pud_idx], __pud(new_val));
+							}
+						}
+					}
+
+					node_pmd_base = pmd_offset(&node_pud_base[pud_idx], 0);
+
+					for (pmd_idx = 0; pmd_idx < PTRS_PER_PMD; pmd_idx++) {
+						pmd_t pmdval;
+
+						if (!mm->repl_in_progress)
+							return;
+
+						pmdval = READ_ONCE(node_pmd_base[pmd_idx]);
+						if (pmd_none(pmdval) || !pmd_present(pmdval) || pmd_trans_huge(pmdval))
+							continue;
+
+						child_phys = pmd_val(pmdval) & PTE_PFN_MASK;
+						if (child_phys) {
+							child_page = pfn_to_page(child_phys >> PAGE_SHIFT);
+							if (READ_ONCE(child_page->pt_replica)) {
+								struct page *local_child = get_replica_for_node(child_page, node);
+
+								if (local_child && page_to_nid(local_child) == node) {
+									unsigned long new_phys = __pa(page_address(local_child));
+									pmdval_t new_val = new_phys | (pmd_val(pmdval) & ~PTE_PFN_MASK);
+
+									WRITE_ONCE(node_pmd_base[pmd_idx], __pmd(new_val));
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	smp_mb();
 }
 
 int pgtable_repl_enable(struct mm_struct *mm, nodemask_t nodes)
 {
-    struct page *pgd_pages[NUMA_NODE_COUNT];
-    struct page *base_page;
-    pgd_t *base_pgd;
-    int node, count = 0, base_node, ret = 0, i;
-    struct task_struct *t;
+	struct page *pgd_pages[NUMA_NODE_COUNT];
+	struct page *base_page;
+	pgd_t *base_pgd;
+	int node, count = 0, base_node, ret = 0, i;
+	struct task_struct *t;
 
-    if (!mm || mm == &init_mm || nodes_empty(nodes) || nodes_weight(nodes) < 2)
-        return -EINVAL;
+	if (!mm || mm == &init_mm || nodes_empty(nodes) || nodes_weight(nodes) < 2)
+		return -EINVAL;
 
-    for_each_node_mask(node, nodes) {
-        if (!node_online(node))
-            return -EINVAL;
-    }
+	for_each_node_mask(node, nodes) {
+		if (!node_online(node))
+			return -EINVAL;
+	}
 
-    for (i = 0; i < NUMA_NODE_COUNT; i++)
-        WRITE_ONCE(mm->repl_steering[i], -1);
+	for (i = 0; i < NUMA_NODE_COUNT; i++)
+		WRITE_ONCE(mm->repl_steering[i], -1);
 
-    mutex_lock(&global_repl_mutex);
-    mutex_lock(&mm->repl_mutex);
+	mutex_lock(&global_repl_mutex);
+	mutex_lock(&mm->repl_mutex);
 
-    if (mm->repl_pgd_enabled) {
-        ret = nodes_equal(mm->repl_pgd_nodes, nodes) ? 0 : -EALREADY;
-        goto out_unlock;
-    }
+	if (mm->repl_pgd_enabled) {
+		ret = nodes_equal(mm->repl_pgd_nodes, nodes) ? 0 : -EALREADY;
+		goto out_unlock;
+	}
 
-    base_pgd = mm->pgd;
-    base_page = virt_to_page(base_pgd);
-    base_node = page_to_nid(base_page);
+	base_pgd = mm->pgd;
+	base_page = virt_to_page(base_pgd);
+	base_node = page_to_nid(base_page);
 
-    if (!node_isset(base_node, nodes))
-        node_set(base_node, nodes);
+	if (!node_isset(base_node, nodes))
+		node_set(base_node, nodes);
 
-    mm->original_pgd = base_pgd;
+	mm->original_pgd = base_pgd;
 
-    if (READ_ONCE(base_page->pt_replica))
-        mitosis_free_replica_chain(base_page, MITOSIS_CACHE_PGD, mitosis_pgd_alloc_order());
+	if (READ_ONCE(base_page->pt_replica))
+		mitosis_free_replica_chain(base_page, MITOSIS_CACHE_PGD, mitosis_pgd_alloc_order());
 
-    WRITE_ONCE(base_page->pt_replica, NULL);
+	WRITE_ONCE(base_page->pt_replica, NULL);
 
-    ret = alloc_pgd_replicas(base_page, mm, nodes, pgd_pages, &count);
-    if (ret)
-        goto fail_cleanup;
+	ret = alloc_pgd_replicas(base_page, mm, nodes, pgd_pages, &count);
+	if (ret)
+		goto fail_cleanup;
 
-    for (i = 1; i < count; i++) {
-        pgd_t *dst_pgd = page_address(pgd_pages[i]);
+	for (i = 1; i < count; i++) {
+		pgd_t *dst_pgd = page_address(pgd_pages[i]);
 
-        memcpy(dst_pgd, base_pgd, PAGE_SIZE);
+		memcpy(dst_pgd, base_pgd, PAGE_SIZE);
 
-        if (mitosis_pti_active()) {
-            pgd_t *src_user = mitosis_kernel_to_user_pgd(base_pgd);
-            pgd_t *dst_user = mitosis_kernel_to_user_pgd(dst_pgd);
-            if (src_user && dst_user) {
-                memcpy(dst_user, src_user, PAGE_SIZE);
-            }
-        }
-    }
+		if (mitosis_pti_active()) {
+			pgd_t *src_user = mitosis_kernel_to_user_pgd(base_pgd);
+			pgd_t *dst_user = mitosis_kernel_to_user_pgd(dst_pgd);
 
-    BUG_ON(!link_page_replicas(pgd_pages, count));
+			if (src_user && dst_user)
+				memcpy(dst_user, src_user, PAGE_SIZE);
+		}
+	}
 
-    mitosis_verify_chain_integrity(base_page, mm, MITOSIS_CACHE_PGD);
+	BUG_ON(!link_page_replicas(pgd_pages, count));
 
-    mm->repl_pgd_nodes = nodes;
-    memset(mm->pgd_replicas, 0, sizeof(mm->pgd_replicas));
+	mitosis_verify_chain_integrity(base_page, mm, MITOSIS_CACHE_PGD);
 
-    for (i = 0; i < count; i++) {
-        int node_id = page_to_nid(pgd_pages[i]);
-        mm->pgd_replicas[node_id] = page_address(pgd_pages[i]);
-    }
+	mm->repl_pgd_nodes = nodes;
+	memset(mm->pgd_replicas, 0, sizeof(mm->pgd_replicas));
 
-    mmap_write_lock(mm);
-    
-    rcu_read_lock();
-    for_each_thread(current, t) {
-       if (t != current)
-           send_sig(SIGSTOP, t, 1);
-    }
-    rcu_read_unlock();
+	for (i = 0; i < count; i++) {
+		int node_id = page_to_nid(pgd_pages[i]);
 
-    smp_store_release(&mm->repl_in_progress, true);
-    smp_store_release(&mm->repl_pgd_enabled, true);
-    smp_mb();
+		mm->pgd_replicas[node_id] = page_address(pgd_pages[i]);
+	}
 
-    replicate_existing_pagetables_phase1(mm);
-    replicate_existing_pagetables_phase2(mm);
+	mmap_write_lock(mm);
 
-    smp_mb();
-    smp_store_release(&mm->repl_in_progress, false);
+	rcu_read_lock();
+	for_each_thread(current, t) {
+		if (t != current)
+			send_sig(SIGSTOP, t, 1);
+	}
+	rcu_read_unlock();
 
-    mmap_write_unlock(mm);
-    
-    rcu_read_lock();
-    for_each_thread(current, t) {
-       if (t != current)
-           send_sig(SIGCONT, t, 1);
-    }
-    rcu_read_unlock();
+	smp_store_release(&mm->repl_in_progress, true);
+	smp_store_release(&mm->repl_pgd_enabled, true);
+	smp_mb();
 
-    pgtable_repl_force_steering_switch(mm, NULL);
+	replicate_existing_pagetables_phase1(mm);
+	replicate_existing_pagetables_phase2(mm);
 
-    mutex_unlock(&mm->repl_mutex);
-    mutex_unlock(&global_repl_mutex);
+	smp_mb();
+	smp_store_release(&mm->repl_in_progress, false);
 
-    pr_info("MITOSIS: Enabled page table replication for mm %px on %d nodes\n", mm, count);
+	mmap_write_unlock(mm);
 
-    mitosis_verify_after_enable(mm);
+	rcu_read_lock();
+	for_each_thread(current, t) {
+		if (t != current)
+			send_sig(SIGCONT, t, 1);
+	}
+	rcu_read_unlock();
 
-    return 0;
+	pgtable_repl_force_steering_switch(mm, NULL);
+
+	mutex_unlock(&mm->repl_mutex);
+	mutex_unlock(&global_repl_mutex);
+
+	pr_info("MITOSIS: Enabled page table replication for mm %px on %d nodes\n", mm, count);
+
+	mitosis_verify_after_enable(mm);
+
+	return 0;
 
 fail_cleanup:
-    WRITE_ONCE(base_page->pt_replica, NULL);
-    mm->repl_pgd_enabled = false;
-    mm->repl_in_progress = false;
-    nodes_clear(mm->repl_pgd_nodes);
-    memset(mm->pgd_replicas, 0, sizeof(mm->pgd_replicas));
-    mm->original_pgd = NULL;
+	WRITE_ONCE(base_page->pt_replica, NULL);
+	mm->repl_pgd_enabled = false;
+	mm->repl_in_progress = false;
+	nodes_clear(mm->repl_pgd_nodes);
+	memset(mm->pgd_replicas, 0, sizeof(mm->pgd_replicas));
+	mm->original_pgd = NULL;
 
 out_unlock:
-    mutex_unlock(&mm->repl_mutex);
-    mutex_unlock(&global_repl_mutex);
-    return ret;
+	mutex_unlock(&mm->repl_mutex);
+	mutex_unlock(&global_repl_mutex);
+	return ret;
 }
 
 static void switch_cr3_ipi(void *info)
 {
-    struct cr3_switch_info *switch_info = info;
-    struct mm_struct *mm;
-    pgd_t *original_pgd;
-    unsigned long original_pgd_pa, current_cr3, current_pgd_pa;
+	struct cr3_switch_info *switch_info = info;
+	struct mm_struct *mm;
+	pgd_t *original_pgd;
+	unsigned long original_pgd_pa, current_cr3, current_pgd_pa;
 
-    if (!switch_info || !switch_info->mm || !switch_info->original_pgd)
-        return;
+	if (!switch_info || !switch_info->mm || !switch_info->original_pgd)
+		return;
 
-    mm = switch_info->mm;
-    original_pgd = switch_info->original_pgd;
+	mm = switch_info->mm;
+	original_pgd = switch_info->original_pgd;
 
-    if (current->mm != mm && current->active_mm != mm)
-        return;
+	if (current->mm != mm && current->active_mm != mm)
+		return;
 
-    original_pgd_pa = __pa(original_pgd);
-    current_cr3 = __read_cr3();
-    current_pgd_pa = current_cr3 & PAGE_MASK;
+	original_pgd_pa = __pa(original_pgd);
+	current_cr3 = __read_cr3();
+	current_pgd_pa = current_cr3 & PAGE_MASK;
 
-    if (current_pgd_pa != original_pgd_pa) {
-        unsigned long new_cr3 = original_pgd_pa | (current_cr3 & ~PAGE_MASK);
-        native_write_cr3(new_cr3);
-        __flush_tlb_all();
-    }
+	if (current_pgd_pa != original_pgd_pa) {
+		unsigned long new_cr3 = original_pgd_pa | (current_cr3 & ~PAGE_MASK);
+
+		native_write_cr3(new_cr3);
+		__flush_tlb_all();
+	}
 }
 
 void pgtable_repl_disable(struct mm_struct *mm)
 {
-    unsigned long flags;
-    int original_node;
-    struct cr3_switch_info switch_info;
-    struct page *primary_pgd_page;
-    int alloc_order;
-    int node;
-    pgd_t *pgd;
-    int pgd_idx, p4d_idx, pud_idx, pmd_idx;
+	unsigned long flags;
+	int original_node;
+	struct cr3_switch_info switch_info;
+	struct page *primary_pgd_page;
+	int alloc_order;
+	int node;
+	pgd_t *pgd;
+	int pgd_idx, p4d_idx, pud_idx, pmd_idx;
 
-    if (!mm || mm == &init_mm)
-        return;
+	if (!mm || mm == &init_mm)
+		return;
 
-    mutex_lock(&global_repl_mutex);
+	mutex_lock(&global_repl_mutex);
 
-    if (!mm->repl_pgd_enabled && nodes_empty(mm->repl_pgd_nodes)) {
-        mutex_unlock(&global_repl_mutex);
-        return;
-    }
+	if (!mm->repl_pgd_enabled && nodes_empty(mm->repl_pgd_nodes)) {
+		mutex_unlock(&global_repl_mutex);
+		return;
+	}
 
-    mutex_lock(&mm->repl_mutex);
+	mutex_lock(&mm->repl_mutex);
 
-    if (!mm->original_pgd)
-        mm->original_pgd = mm->pgd;
+	if (!mm->original_pgd)
+		mm->original_pgd = mm->pgd;
 
-    original_node = page_to_nid(virt_to_page(mm->original_pgd));
+	original_node = page_to_nid(virt_to_page(mm->original_pgd));
 
-    smp_store_release(&mm->repl_pgd_enabled, false);
-    smp_mb();
+	smp_store_release(&mm->repl_pgd_enabled, false);
+	smp_mb();
 
-    WRITE_ONCE(mm->pgd, mm->original_pgd);
-    smp_mb();
+	WRITE_ONCE(mm->pgd, mm->original_pgd);
+	smp_mb();
 
-    switch_info.mm = mm;
-    switch_info.original_pgd = mm->original_pgd;
-    switch_info.initiating_cpu = smp_processor_id();
+	switch_info.mm = mm;
+	switch_info.original_pgd = mm->original_pgd;
+	switch_info.initiating_cpu = smp_processor_id();
 
-    local_irq_save(flags);
-    if (current->mm == mm || current->active_mm == mm) {
-        unsigned long current_cr3_pa = __read_cr3() & PAGE_MASK;
-        unsigned long original_pgd_pa = __pa(mm->original_pgd);
-        if (current_cr3_pa != original_pgd_pa) {
-            native_write_cr3(original_pgd_pa | (__read_cr3() & ~PAGE_MASK));
-            __flush_tlb_all();
-        }
-    }
-    local_irq_restore(flags);
+	local_irq_save(flags);
+	if (current->mm == mm || current->active_mm == mm) {
+		unsigned long current_cr3_pa = __read_cr3() & PAGE_MASK;
+		unsigned long original_pgd_pa = __pa(mm->original_pgd);
 
-    on_each_cpu_mask(mm_cpumask(mm), switch_cr3_ipi, &switch_info, 1);
+		if (current_cr3_pa != original_pgd_pa) {
+			native_write_cr3(original_pgd_pa | (__read_cr3() & ~PAGE_MASK));
+			__flush_tlb_all();
+		}
+	}
+	local_irq_restore(flags);
 
-    smp_mb();
-    synchronize_rcu();
+	on_each_cpu_mask(mm_cpumask(mm), switch_cr3_ipi, &switch_info, 1);
 
-    pgd = mm->pgd;
+	smp_mb();
+	synchronize_rcu();
 
-    for (pgd_idx = 0; pgd_idx < KERNEL_PGD_BOUNDARY; pgd_idx++) {
-        pgd_t pgdval;
-        p4d_t *p4d_base;
-        unsigned long child_phys;
+	pgd = mm->pgd;
 
-        pgdval = READ_ONCE(pgd[pgd_idx]);
-        if (pgd_none(pgdval) || !pgd_present(pgdval))
-            continue;
+	for (pgd_idx = 0; pgd_idx < KERNEL_PGD_BOUNDARY; pgd_idx++) {
+		pgd_t pgdval;
+		p4d_t *p4d_base;
+		unsigned long child_phys;
 
-        if (pgtable_l5_enabled()) {
-            child_phys = pgd_val(pgdval) & PTE_PFN_MASK;
-            if (child_phys)
-                mitosis_free_replica_chain(pfn_to_page(child_phys >> PAGE_SHIFT), MITOSIS_CACHE_P4D, 0);
-        }
+		pgdval = READ_ONCE(pgd[pgd_idx]);
+		if (pgd_none(pgdval) || !pgd_present(pgdval))
+			continue;
 
-        p4d_base = p4d_offset(&pgd[pgd_idx], 0);
+		if (pgtable_l5_enabled()) {
+			child_phys = pgd_val(pgdval) & PTE_PFN_MASK;
+			if (child_phys)
+				mitosis_free_replica_chain(pfn_to_page(child_phys >> PAGE_SHIFT), MITOSIS_CACHE_P4D, 0);
+		}
 
-        for (p4d_idx = 0; p4d_idx < PTRS_PER_P4D; p4d_idx++) {
-            p4d_t p4dval;
-            pud_t *pud_base;
+		p4d_base = p4d_offset(&pgd[pgd_idx], 0);
 
-            p4dval = READ_ONCE(p4d_base[p4d_idx]);
-            if (p4d_none(p4dval) || !p4d_present(p4dval))
-                continue;
+		for (p4d_idx = 0; p4d_idx < PTRS_PER_P4D; p4d_idx++) {
+			p4d_t p4dval;
+			pud_t *pud_base;
 
-            child_phys = p4d_val(p4dval) & PTE_PFN_MASK;
-            if (child_phys)
-                mitosis_free_replica_chain(pfn_to_page(child_phys >> PAGE_SHIFT), MITOSIS_CACHE_PUD, 0);
+			p4dval = READ_ONCE(p4d_base[p4d_idx]);
+			if (p4d_none(p4dval) || !p4d_present(p4dval))
+				continue;
 
-            pud_base = pud_offset(&p4d_base[p4d_idx], 0);
+			child_phys = p4d_val(p4dval) & PTE_PFN_MASK;
+			if (child_phys)
+				mitosis_free_replica_chain(pfn_to_page(child_phys >> PAGE_SHIFT), MITOSIS_CACHE_PUD, 0);
 
-            for (pud_idx = 0; pud_idx < PTRS_PER_PUD; pud_idx++) {
-                pud_t pudval;
-                pmd_t *pmd_base;
+			pud_base = pud_offset(&p4d_base[p4d_idx], 0);
 
-                pudval = READ_ONCE(pud_base[pud_idx]);
-                if (pud_none(pudval) || !pud_present(pudval) || pud_trans_huge(pudval))
-                    continue;
+			for (pud_idx = 0; pud_idx < PTRS_PER_PUD; pud_idx++) {
+				pud_t pudval;
+				pmd_t *pmd_base;
 
-                child_phys = pud_val(pudval) & PTE_PFN_MASK;
-                if (child_phys)
-                    mitosis_free_replica_chain(pfn_to_page(child_phys >> PAGE_SHIFT), MITOSIS_CACHE_PMD, 0);
+				pudval = READ_ONCE(pud_base[pud_idx]);
+				if (pud_none(pudval) || !pud_present(pudval) || pud_trans_huge(pudval))
+					continue;
 
-                pmd_base = pmd_offset(&pud_base[pud_idx], 0);
+				child_phys = pud_val(pudval) & PTE_PFN_MASK;
+				if (child_phys)
+					mitosis_free_replica_chain(pfn_to_page(child_phys >> PAGE_SHIFT), MITOSIS_CACHE_PMD, 0);
 
-                for (pmd_idx = 0; pmd_idx < PTRS_PER_PMD; pmd_idx++) {
-                    pmd_t pmdval;
+				pmd_base = pmd_offset(&pud_base[pud_idx], 0);
 
-                    pmdval = READ_ONCE(pmd_base[pmd_idx]);
-                    if (pmd_none(pmdval) || !pmd_present(pmdval) || pmd_trans_huge(pmdval))
-                        continue;
+				for (pmd_idx = 0; pmd_idx < PTRS_PER_PMD; pmd_idx++) {
+					pmd_t pmdval;
 
-                    child_phys = pmd_val(pmdval) & PTE_PFN_MASK;
-                    if (child_phys)
-                        mitosis_free_replica_chain(pfn_to_page(child_phys >> PAGE_SHIFT), MITOSIS_CACHE_PTE, 0);
-                }
-            }
-        }
-    }
+					pmdval = READ_ONCE(pmd_base[pmd_idx]);
+					if (pmd_none(pmdval) || !pmd_present(pmdval) || pmd_trans_huge(pmdval))
+						continue;
 
-    smp_mb();
+					child_phys = pmd_val(pmdval) & PTE_PFN_MASK;
+					if (child_phys)
+						mitosis_free_replica_chain(pfn_to_page(child_phys >> PAGE_SHIFT), MITOSIS_CACHE_PTE, 0);
+				}
+			}
+		}
+	}
 
-    primary_pgd_page = virt_to_page(mm->pgd);
-    alloc_order = mitosis_pgd_alloc_order();
+	smp_mb();
 
-    WRITE_ONCE(primary_pgd_page->pt_replica, NULL);
-    smp_wmb();
+	primary_pgd_page = virt_to_page(mm->pgd);
+	alloc_order = mitosis_pgd_alloc_order();
 
-    for_each_node_mask(node, mm->repl_pgd_nodes) {
-        pgd_t *replica_pgd;
-        struct page *replica_page;
-        bool from_cache;
+	WRITE_ONCE(primary_pgd_page->pt_replica, NULL);
+	smp_wmb();
 
-        if (node == original_node)
-            continue;
+	for_each_node_mask(node, mm->repl_pgd_nodes) {
+		pgd_t *replica_pgd;
+		struct page *replica_page;
+		bool from_cache;
 
-        replica_pgd = mm->pgd_replicas[node];
-        if (!replica_pgd)
-            continue;
+		if (node == original_node)
+			continue;
 
-        replica_page = virt_to_page(replica_pgd);
-        from_cache = PageMitosisFromCache(replica_page);
-        WRITE_ONCE(replica_page->pt_replica, NULL);
+		replica_pgd = mm->pgd_replicas[node];
+		if (!replica_pgd)
+			continue;
 
-        replica_page->pt_owner_mm = NULL;
+		replica_page = virt_to_page(replica_pgd);
+		from_cache = PageMitosisFromCache(replica_page);
+		WRITE_ONCE(replica_page->pt_replica, NULL);
 
-        if (alloc_order == 0 && from_cache) {
-            ClearPageMitosisFromCache(replica_page);
-            replica_page->pt_replica = NULL;
-            if (mitosis_cache_push(replica_page, node, MITOSIS_CACHE_PGD)) {
-                mm->pgd_replicas[node] = NULL;
-                continue;
-            }
-        }
+		replica_page->pt_owner_mm = NULL;
 
-        ClearPageMitosisFromCache(replica_page);
-        __free_pages(replica_page, alloc_order);
+		if (alloc_order == 0 && from_cache) {
+			ClearPageMitosisFromCache(replica_page);
+			replica_page->pt_replica = NULL;
+			if (mitosis_cache_push(replica_page, node, MITOSIS_CACHE_PGD)) {
+				mm->pgd_replicas[node] = NULL;
+				continue;
+			}
+		}
 
-        mm->pgd_replicas[node] = NULL;
-    }
+		ClearPageMitosisFromCache(replica_page);
+		__free_pages(replica_page, alloc_order);
 
-    memset(mm->pgd_replicas, 0, sizeof(mm->pgd_replicas));
-    nodes_clear(mm->repl_pgd_nodes);
-    mm->original_pgd = NULL;
+		mm->pgd_replicas[node] = NULL;
+	}
 
-    pr_info("MITOSIS: Disabled page table replication for mm %p\n", mm);
+	memset(mm->pgd_replicas, 0, sizeof(mm->pgd_replicas));
+	nodes_clear(mm->repl_pgd_nodes);
+	mm->original_pgd = NULL;
 
-    mitosis_verify_after_disable(mm);
+	pr_info("MITOSIS: Disabled page table replication for mm %p\n", mm);
 
-    mutex_unlock(&mm->repl_mutex);
-    mutex_unlock(&global_repl_mutex);
-    synchronize_rcu();
+	mitosis_verify_after_disable(mm);
+
+	mutex_unlock(&mm->repl_mutex);
+	mutex_unlock(&global_repl_mutex);
+	synchronize_rcu();
 }
 
 int mitosis_inherit_sysctl_handler(struct ctl_table *table, int write,
@@ -791,85 +808,85 @@ int mitosis_inherit_sysctl_handler(struct ctl_table *table, int write,
 }
 
 struct mitosis_enable_work {
-    struct callback_head twork;
-    nodemask_t nodes;
-    int result;
-    struct completion done;
+	struct callback_head twork;
+	nodemask_t nodes;
+	int result;
+	struct completion done;
 };
 
 static void mitosis_enable_task_work_fn(struct callback_head *head)
 {
-    struct mitosis_enable_work *work =
-        container_of(head, struct mitosis_enable_work, twork);
+	struct mitosis_enable_work *work =
+		container_of(head, struct mitosis_enable_work, twork);
 
-    work->result = pgtable_repl_enable(current->mm, work->nodes);
-    complete(&work->done);
+	work->result = pgtable_repl_enable(current->mm, work->nodes);
+	complete(&work->done);
 }
 
 int pgtable_repl_enable_external(struct task_struct *target, nodemask_t nodes)
 {
-    struct mitosis_enable_work work;
-    int ret;
+	struct mitosis_enable_work work;
+	int ret;
 
-    if (target == current)
-        return pgtable_repl_enable(current->mm, nodes);
+	if (target == current)
+		return pgtable_repl_enable(current->mm, nodes);
 
-    if (!target->mm)
-        return -EINVAL;
+	if (!target->mm)
+		return -EINVAL;
 
-    init_completion(&work.done);
-    work.nodes = nodes;
-    work.result = -EINVAL;
-    init_task_work(&work.twork, mitosis_enable_task_work_fn);
+	init_completion(&work.done);
+	work.nodes = nodes;
+	work.result = -EINVAL;
+	init_task_work(&work.twork, mitosis_enable_task_work_fn);
 
-    ret = task_work_add(target, &work.twork, TWA_SIGNAL);
-    if (ret)
-        return ret;
+	ret = task_work_add(target, &work.twork, TWA_SIGNAL);
+	if (ret)
+		return ret;
 
-    wait_for_completion(&work.done);
+	wait_for_completion(&work.done);
 
-    return work.result;
+	return work.result;
 }
 
 struct mitosis_disable_work {
-    struct callback_head twork;
-    int result;
-    struct completion done;
+	struct callback_head twork;
+	int result;
+	struct completion done;
 };
 
 static void mitosis_disable_task_work_fn(struct callback_head *head)
 {
-    struct mitosis_disable_work *work =
-        container_of(head, struct mitosis_disable_work, twork);
+	struct mitosis_disable_work *work =
+		container_of(head, struct mitosis_disable_work, twork);
 
-    pgtable_repl_disable(current->mm);
-    work->result = 0;
-    complete(&work->done);
+	pgtable_repl_disable(current->mm);
+	work->result = 0;
+	complete(&work->done);
 }
 
 int pgtable_repl_disable_external(struct task_struct *target)
 {
-    struct mitosis_disable_work work;
-    int ret;
+	struct mitosis_disable_work work;
+	int ret;
 
-    if (target == current) {
-        pgtable_repl_disable(current->mm);
-        return 0;
-    }
+	if (target == current) {
+		pgtable_repl_disable(current->mm);
+		return 0;
+	}
 
-    if (!target->mm)
-        return -EINVAL;
+	if (!target->mm)
+		return -EINVAL;
 
-    init_completion(&work.done);
-    work.result = -EINVAL;
-    init_task_work(&work.twork, mitosis_disable_task_work_fn);
+	init_completion(&work.done);
+	work.result = -EINVAL;
+	init_task_work(&work.twork, mitosis_disable_task_work_fn);
 
-    ret = task_work_add(target, &work.twork, TWA_SIGNAL);
-    if (ret)
-        return ret;
+	ret = task_work_add(target, &work.twork, TWA_SIGNAL);
+	if (ret)
+		return ret;
 
-    wait_for_completion(&work.done);
-    return work.result;
+	wait_for_completion(&work.done);
+	return work.result;
 }
 EXPORT_SYMBOL(pgtable_repl_disable_external);
 

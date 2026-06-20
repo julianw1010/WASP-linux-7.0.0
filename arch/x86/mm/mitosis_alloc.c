@@ -9,7 +9,7 @@
 #include <asm/cacheflush.h>
 
 int alloc_pte_replicas(struct page *base_page, struct mm_struct *mm,
-                       struct page **pages, int *count)
+		       struct page **pages, int *count)
 {
 	int i;
 	int base_node;
@@ -64,7 +64,7 @@ int alloc_pte_replicas(struct page *base_page, struct mm_struct *mm,
 }
 
 int alloc_pmd_replicas(struct page *base_page, struct mm_struct *mm,
-                       struct page **pages, int *count)
+		       struct page **pages, int *count)
 {
 	int i;
 	int base_node;
@@ -119,7 +119,7 @@ int alloc_pmd_replicas(struct page *base_page, struct mm_struct *mm,
 }
 
 int alloc_pud_replicas(struct page *base_page, struct mm_struct *mm,
-                       struct page **pages, int *count)
+		       struct page **pages, int *count)
 {
 	int i;
 	int base_node;
@@ -172,7 +172,7 @@ int alloc_pud_replicas(struct page *base_page, struct mm_struct *mm,
 }
 
 int alloc_p4d_replicas(struct page *base_page, struct mm_struct *mm,
-                       struct page **pages, int *count)
+		       struct page **pages, int *count)
 {
 	int i;
 	int base_node;
@@ -224,8 +224,8 @@ int alloc_p4d_replicas(struct page *base_page, struct mm_struct *mm,
 }
 
 int alloc_pgd_replicas(struct page *base_page, struct mm_struct *mm,
-                       nodemask_t nodes,
-                       struct page **pages, int *count)
+		       nodemask_t nodes,
+		       struct page **pages, int *count)
 {
 	int i;
 	int base_node;
@@ -267,7 +267,7 @@ int alloc_pgd_replicas(struct page *base_page, struct mm_struct *mm,
 
 		new_page->pt_owner_mm = mm;
 		if (mm)
-		WRITE_ONCE(new_page->pt_replica, NULL);
+			WRITE_ONCE(new_page->pt_replica, NULL);
 		pages[(*count)++] = new_page;
 	}
 
