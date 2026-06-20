@@ -367,8 +367,8 @@ void pgtable_repl_alloc_pte(struct mm_struct *mm, unsigned long pfn)
 		clflush_cache_range(page_address(pages[i]), PAGE_SIZE);
 	}
 
-	if (unlikely(!smp_load_acquire(&mm->repl_pgd_enabled)) ||
-	    unlikely(!link_page_replicas(pages, count))) {
+	if (!smp_load_acquire(&mm->repl_pgd_enabled) ||
+	    !link_page_replicas(pages, count)) {
 		for (i = 1; i < count; i++) {
 			pagetable_dtor(page_ptdesc(pages[i]));
 			mm_dec_nr_ptes(mm);
@@ -410,8 +410,8 @@ void pgtable_repl_alloc_pmd(struct mm_struct *mm, unsigned long pfn)
 		clflush_cache_range(page_address(pages[i]), PAGE_SIZE);
 	}
 
-	if (unlikely(!smp_load_acquire(&mm->repl_pgd_enabled)) ||
-	    unlikely(!link_page_replicas(pages, count))) {
+	if (!smp_load_acquire(&mm->repl_pgd_enabled) ||
+	    !link_page_replicas(pages, count)) {
 		for (i = 1; i < count; i++) {
 			pagetable_dtor(page_ptdesc(pages[i]));
 			mm_dec_nr_pmds(mm);
@@ -453,8 +453,8 @@ void pgtable_repl_alloc_pud(struct mm_struct *mm, unsigned long pfn)
 		clflush_cache_range(page_address(pages[i]), PAGE_SIZE);
 	}
 
-	if (unlikely(!smp_load_acquire(&mm->repl_pgd_enabled)) ||
-	    unlikely(!link_page_replicas(pages, count))) {
+	if (!smp_load_acquire(&mm->repl_pgd_enabled) ||
+	    !link_page_replicas(pages, count)) {
 		for (i = 1; i < count; i++) {
 			mm_dec_nr_puds(mm);
 			pages[i]->pt_owner_mm = NULL;
@@ -498,8 +498,8 @@ void pgtable_repl_alloc_p4d(struct mm_struct *mm, unsigned long pfn)
 		clflush_cache_range(page_address(pages[i]), PAGE_SIZE);
 	}
 
-	if (unlikely(!smp_load_acquire(&mm->repl_pgd_enabled)) ||
-	    unlikely(!link_page_replicas(pages, count))) {
+	if (!smp_load_acquire(&mm->repl_pgd_enabled) ||
+	    !link_page_replicas(pages, count)) {
 		for (i = 1; i < count; i++) {
 			pages[i]->pt_owner_mm = NULL;
 			__free_page(pages[i]);
