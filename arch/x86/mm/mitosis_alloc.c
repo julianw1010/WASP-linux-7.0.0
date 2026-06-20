@@ -37,8 +37,11 @@ int alloc_pte_replicas(struct page *base_page, struct mm_struct *mm,
 	pages[0] = base_page;
 	*count = 1;
 
-	for_each_node_mask(i, nodes_snapshot) {
+	for (i = 0; i < NUMA_NODE_COUNT; i++) {
 		struct page *new_page;
+
+		if (!node_isset(i, nodes_snapshot))
+			continue;
 
 		if (i == base_node)
 			continue;
@@ -92,8 +95,11 @@ int alloc_pmd_replicas(struct page *base_page, struct mm_struct *mm,
 	pages[0] = base_page;
 	*count = 1;
 
-	for_each_node_mask(i, nodes_snapshot) {
+	for (i = 0; i < NUMA_NODE_COUNT; i++) {
 		struct page *new_page;
+
+		if (!node_isset(i, nodes_snapshot))
+			continue;
 
 		if (i == base_node)
 			continue;
@@ -147,8 +153,11 @@ int alloc_pud_replicas(struct page *base_page, struct mm_struct *mm,
 	pages[0] = base_page;
 	*count = 1;
 
-	for_each_node_mask(i, nodes_snapshot) {
+	for (i = 0; i < NUMA_NODE_COUNT; i++) {
 		struct page *new_page;
+
+		if (!node_isset(i, nodes_snapshot))
+			continue;
 
 		if (i == base_node)
 			continue;
@@ -200,8 +209,11 @@ int alloc_p4d_replicas(struct page *base_page, struct mm_struct *mm,
 	pages[0] = base_page;
 	*count = 1;
 
-	for_each_node_mask(i, nodes_snapshot) {
+	for (i = 0; i < NUMA_NODE_COUNT; i++) {
 		struct page *new_page;
+
+		if (!node_isset(i, nodes_snapshot))
+			continue;
 
 		if (i == base_node)
 			continue;
@@ -249,8 +261,11 @@ int alloc_pgd_replicas(struct page *base_page, struct mm_struct *mm,
 	pages[0] = base_page;
 	*count = 1;
 
-	for_each_node_mask(i, nodes) {
+	for (i = 0; i < NUMA_NODE_COUNT; i++) {
 		struct page *new_page;
+
+		if (!node_isset(i, nodes))
+			continue;
 
 		if (i == base_node)
 			continue;

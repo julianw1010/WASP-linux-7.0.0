@@ -279,9 +279,14 @@ void mitosis_verify_tree_consistency(struct mm_struct *mm)
 	pgd = mm->pgd;
 	pgd_page = virt_to_page(pgd);
 
-	for_each_node_mask(node, mm->repl_pgd_nodes) {
-		pgd_t *node_pgd = mm->pgd_replicas[node];
+	for (node = 0; node < NUMA_NODE_COUNT; node++) {
+		pgd_t *node_pgd;
 		struct page *expected;
+
+		if (!node_isset(node, mm->repl_pgd_nodes))
+			continue;
+
+		node_pgd = mm->pgd_replicas[node];
 
 		if (!node_pgd) {
 			pr_err("MITOSIS VERIFY tree: pgd_replicas[%d] NULL\n",
@@ -392,7 +397,6 @@ void mitosis_verify_tree_consistency(struct mm_struct *mm)
 	}
 }
 
-
 void mitosis_verify_after_fork(struct mm_struct *child, struct mm_struct *parent)
 {
 	struct page *child_pgd_page, *parent_pgd_page;
@@ -424,9 +428,15 @@ void mitosis_verify_after_fork(struct mm_struct *child, struct mm_struct *parent
 	}
 
 	if (smp_load_acquire(&parent->repl_pgd_enabled)) {
-		for_each_node_mask(node, child->repl_pgd_nodes) {
-			pgd_t *child_replica = child->pgd_replicas[node];
-			pgd_t *parent_replica = parent->pgd_replicas[node];
+		for (node = 0; node < NUMA_NODE_COUNT; node++) {
+			pgd_t *child_replica;
+			pgd_t *parent_replica;
+
+			if (!node_isset(node, child->repl_pgd_nodes))
+				continue;
+
+			child_replica = child->pgd_replicas[node];
+			parent_replica = parent->pgd_replicas[node];
 
 			if (!child_replica || !parent_replica)
 				continue;
@@ -558,7 +568,6 @@ void mitosis_verify_after_fork(struct mm_struct *child, struct mm_struct *parent
 		}
 	}
 }
-
 
 void mitosis_verify_pti_consistency(struct mm_struct *mm)
 {
@@ -733,7 +742,10 @@ void mitosis_verify_mm_coherence(struct mm_struct *mm)
 		BUG();
 	}
 
-	for_each_node_mask(i, mm->repl_pgd_nodes) {
+	for (i = 0; i < NUMA_NODE_COUNT; i++) {
+		if (!node_isset(i, mm->repl_pgd_nodes))
+			continue;
+
 		if (!mm->pgd_replicas[i]) {
 			pr_err("MITOSIS VERIFY coherence: pgd_replicas[%d] "
 			       "NULL but node in mask mm=%px\n", i, mm);
@@ -1776,7 +1788,10 @@ void mitosis_verify_after_enable(struct mm_struct *mm)
 		BUG();
 	}
 
-	for_each_node_mask(node, mm->repl_pgd_nodes) {
+	for (node = 0; node < NUMA_NODE_COUNT; node++) {
+		if (!node_isset(node, mm->repl_pgd_nodes))
+			continue;
+
 		if (!mm->pgd_replicas[node]) {
 			pr_err("MITOSIS VERIFY enable: pgd_replicas[%d] is NULL\n",
 			       node);

@@ -286,10 +286,13 @@ static void replicate_existing_pagetables_phase2(struct mm_struct *mm)
 	if (!pgd_page->pt_replica)
 		return;
 
-	for_each_node_mask(node, mm->repl_pgd_nodes) {
+	for (node = 0; node < NUMA_NODE_COUNT; node++) {
 		pgd_t *node_pgd;
 		struct page *node_pgd_page;
 		int pgd_idx;
+
+		if (!node_isset(node, mm->repl_pgd_nodes))
+			continue;
 
 		if (!mm->repl_in_progress)
 			return;
@@ -686,10 +689,13 @@ void pgtable_repl_disable(struct mm_struct *mm)
 
 	primary_pgd_page->pt_replica = NULL;
 
-	for_each_node_mask(node, mm->repl_pgd_nodes) {
+	for (node = 0; node < NUMA_NODE_COUNT; node++) {
 		pgd_t *replica_pgd;
 		struct page *replica_page;
 		bool from_cache;
+
+		if (!node_isset(node, mm->repl_pgd_nodes))
+			continue;
 
 		if (node == original_node)
 			continue;
