@@ -337,159 +337,179 @@ native_only:
 	native_set_pgd(pgdp, pgdval);
 }
 
-pte_t pgtable_repl_get_pte(pte_t *ptep)
+static unsigned long repl_get_entry(void *entryp)
 {
-	struct page *pte_page;
+	struct page *page;
 	struct page *cur_page;
 	struct page *start_page;
 	unsigned long offset;
-	pteval_t val;
+	unsigned long val;
 
-	if (!ptep)
-		return __pte(0);
+	if (!entryp)
+		return 0;
 
-	if (!virt_addr_valid(ptep))
-		return __pte(pte_val(*ptep));
+	if (!virt_addr_valid(entryp))
+		return *(unsigned long *)entryp;
 
-	pte_page = virt_to_page(ptep);
+	page = virt_to_page(entryp);
 
-	if (!pte_page || !pfn_valid(page_to_pfn(pte_page)) ||
-	    !pte_page->pt_replica)
-		return __pte(pte_val(*ptep));
+	if (!page || !pfn_valid(page_to_pfn(page)) ||
+	    !page->pt_replica)
+		return *(unsigned long *)entryp;
 
 	val = 0;
-	offset = ((unsigned long)ptep) & ~PAGE_MASK;
-	start_page = pte_page;
-	cur_page = pte_page;
+	offset = ((unsigned long)entryp) & ~PAGE_MASK;
+	start_page = page;
+	cur_page = page;
 
 	do {
-		pte_t *replica_entry = (pte_t *)(page_address(cur_page) + offset);
+		unsigned long *replica_entry =
+			(unsigned long *)(page_address(cur_page) + offset);
+		unsigned long entry_val = *replica_entry;
 
-		val |= pte_val(*replica_entry);
+		if (cur_page == start_page) {
+			val = entry_val;
+			if (!(entry_val & _PAGE_PRESENT))
+				break;
+		} else if (entry_val & _PAGE_PRESENT) {
+			val |= entry_val & PTE_FLAGS_MASK;
+		}
 		cur_page = cur_page->pt_replica;
 	} while (cur_page && cur_page != start_page);
+	return val;
+}
 
-	{
-		pte_t ret = (pte_t){ .pte = val };
-		return ret;
-	}
+pte_t pgtable_repl_get_pte(pte_t *ptep)
+{
+	return __pte(repl_get_entry(ptep));
+}
+
+static unsigned long repl_get_and_clear_entry(void *entryp)
+{
+	struct page *page;
+	struct page *cur_page;
+	struct page *start_page;
+	unsigned long offset;
+	unsigned long val = 0;
+
+	if (!entryp)
+		return 0;
+
+	if (!virt_addr_valid(entryp))
+		return xchg((unsigned long *)entryp, 0);
+
+	page = virt_to_page(entryp);
+
+	if (!page || !pfn_valid(page_to_pfn(page)) ||
+	    !page->pt_replica)
+		return xchg((unsigned long *)entryp, 0);
+
+	offset = ((unsigned long)entryp) & ~PAGE_MASK;
+	start_page = page;
+	cur_page = page;
+
+	do {
+		unsigned long *replica_entry =
+			(unsigned long *)(page_address(cur_page) + offset);
+		unsigned long old_val = xchg(replica_entry, 0);
+
+		val |= old_val;
+		cur_page = cur_page->pt_replica;
+	} while (cur_page && cur_page != start_page);
+	return val;
 }
 
 pte_t pgtable_repl_ptep_get_and_clear(struct mm_struct *mm, pte_t *ptep)
 {
-	struct page *pte_page;
-	struct page *cur_page;
-	struct page *start_page;
-	unsigned long offset;
-	pteval_t val = 0;
-
-	if (!ptep)
-		return __pte(0);
-
-	if (!virt_addr_valid(ptep))
-		return native_ptep_get_and_clear(ptep);
-
-	pte_page = virt_to_page(ptep);
-
-	if (!pte_page || !pfn_valid(page_to_pfn(pte_page)) ||
-	    !pte_page->pt_replica)
-		return native_ptep_get_and_clear(ptep);
-
-	offset = ((unsigned long)ptep) & ~PAGE_MASK;
-	start_page = pte_page;
-	cur_page = pte_page;
-
-	do {
-		pte_t *replica_entry = (pte_t *)(page_address(cur_page) + offset);
-		pte_t old_entry = native_ptep_get_and_clear(replica_entry);
-
-		val |= pte_val(old_entry);
-		cur_page = cur_page->pt_replica;
-	} while (cur_page && cur_page != start_page);
-	return __pte(val);
+	return __pte(repl_get_and_clear_entry(ptep));
 }
 
-void pgtable_repl_ptep_set_wrprotect(struct mm_struct *mm,
-				     unsigned long addr, pte_t *ptep)
+static void repl_set_wrprotect_entry(void *entryp)
 {
-	struct page *pte_page;
+	struct page *page;
 	struct page *cur_page;
 	struct page *start_page;
 	unsigned long offset;
-	pte_t old_pte, new_pte;
+	unsigned long old_val, new_val;
 
-	if (!ptep ||
-	    !virt_addr_valid(ptep))
+	if (!entryp || !virt_addr_valid(entryp))
 		goto native_only;
 
-	pte_page = virt_to_page(ptep);
+	page = virt_to_page(entryp);
 
-	if (!pte_page || !pfn_valid(page_to_pfn(pte_page)))
+	if (!page || !pfn_valid(page_to_pfn(page)))
 		goto native_only;
 
-	if (!pte_page->pt_replica) {
-		old_pte = READ_ONCE(*ptep);
+	if (!page->pt_replica) {
+		old_val = READ_ONCE(*(unsigned long *)entryp);
 		do {
-			new_pte = pte_wrprotect(old_pte);
-		} while (!try_cmpxchg((long *)&ptep->pte, (long *)&old_pte, *(long *)&new_pte));
+			new_val = old_val & ~_PAGE_RW;
+		} while (!try_cmpxchg((long *)entryp, (long *)&old_val, *(long *)&new_val));
 		return;
 	}
 
-	offset = ((unsigned long)ptep) & ~PAGE_MASK;
-	start_page = pte_page;
-	cur_page = pte_page;
+	offset = ((unsigned long)entryp) & ~PAGE_MASK;
+	start_page = page;
+	cur_page = page;
 
 	do {
-		pte_t *replica_entry = (pte_t *)(page_address(cur_page) + offset);
+		unsigned long *replica_entry =
+			(unsigned long *)(page_address(cur_page) + offset);
 
-		old_pte = READ_ONCE(*replica_entry);
+		old_val = READ_ONCE(*replica_entry);
 		do {
-			new_pte = pte_wrprotect(old_pte);
-		} while (!try_cmpxchg((long *)&replica_entry->pte, (long *)&old_pte, *(long *)&new_pte));
+			new_val = old_val & ~_PAGE_RW;
+		} while (!try_cmpxchg((long *)replica_entry, (long *)&old_val, *(long *)&new_val));
 		cur_page = cur_page->pt_replica;
 	} while (cur_page && cur_page != start_page);
 	return;
 
 native_only:
-	old_pte = READ_ONCE(*ptep);
+	old_val = READ_ONCE(*(unsigned long *)entryp);
 	do {
-		new_pte = pte_wrprotect(old_pte);
-	} while (!try_cmpxchg((long *)&ptep->pte, (long *)&old_pte, *(long *)&new_pte));
+		new_val = old_val & ~_PAGE_RW;
+	} while (!try_cmpxchg((long *)entryp, (long *)&old_val, *(long *)&new_val));
 }
 
-int pgtable_repl_ptep_test_and_clear_young(struct vm_area_struct *vma,
-					   unsigned long addr, pte_t *ptep)
+void pgtable_repl_ptep_set_wrprotect(struct mm_struct *mm,
+				     unsigned long addr, pte_t *ptep)
 {
-	struct page *pte_page;
+	repl_set_wrprotect_entry(ptep);
+}
+
+static int repl_test_and_clear_young_entry(void *entryp)
+{
+	struct page *page;
 	struct page *cur_page;
 	struct page *start_page;
 	unsigned long offset;
 	int young = 0;
 
-	if (!ptep ||
-	    !virt_addr_valid(ptep))
+	if (!entryp || !virt_addr_valid(entryp))
 		goto native_only;
 
-	pte_page = virt_to_page(ptep);
+	page = virt_to_page(entryp);
 
-	if (!pte_page || !pfn_valid(page_to_pfn(pte_page)))
+	if (!page || !pfn_valid(page_to_pfn(page)))
 		goto native_only;
 
-	if (!pte_page->pt_replica) {
-		if (pte_young(*ptep))
-			young = test_and_clear_bit(_PAGE_BIT_ACCESSED, (unsigned long *)&ptep->pte);
+	if (!page->pt_replica) {
+		if (test_bit(_PAGE_BIT_ACCESSED, (unsigned long *)entryp))
+			young = test_and_clear_bit(_PAGE_BIT_ACCESSED,
+						   (unsigned long *)entryp);
 		return young;
 	}
 
-	offset = ((unsigned long)ptep) & ~PAGE_MASK;
-	start_page = pte_page;
-	cur_page = pte_page;
+	offset = ((unsigned long)entryp) & ~PAGE_MASK;
+	start_page = page;
+	cur_page = page;
 
 	do {
-		pte_t *replica_entry = (pte_t *)(page_address(cur_page) + offset);
+		unsigned long *replica_entry =
+			(unsigned long *)(page_address(cur_page) + offset);
 
-		if (pte_young(*replica_entry)) {
-			if (test_and_clear_bit(_PAGE_BIT_ACCESSED, (unsigned long *)&replica_entry->pte))
+		if (test_bit(_PAGE_BIT_ACCESSED, replica_entry)) {
+			if (test_and_clear_bit(_PAGE_BIT_ACCESSED, replica_entry))
 				young = 1;
 		}
 
@@ -498,91 +518,27 @@ int pgtable_repl_ptep_test_and_clear_young(struct vm_area_struct *vma,
 	return young;
 
 native_only:
-	return test_and_clear_bit(_PAGE_BIT_ACCESSED, (unsigned long *)&ptep->pte);
+	if (test_bit(_PAGE_BIT_ACCESSED, (unsigned long *)entryp))
+		young = test_and_clear_bit(_PAGE_BIT_ACCESSED,
+					   (unsigned long *)entryp);
+	return young;
+}
+
+int pgtable_repl_ptep_test_and_clear_young(struct vm_area_struct *vma,
+					   unsigned long addr, pte_t *ptep)
+{
+	return repl_test_and_clear_young_entry(ptep);
 }
 
 pmd_t pgtable_repl_pmdp_huge_get_and_clear(struct mm_struct *mm, pmd_t *pmdp)
 {
-	struct page *pmd_page;
-	struct page *cur_page;
-	struct page *start_page;
-	unsigned long offset;
-	pmdval_t val;
-
-	if (!pmdp)
-		return __pmd(0);
-
-	if (!virt_addr_valid(pmdp))
-		return native_pmdp_get_and_clear(pmdp);
-
-	pmd_page = virt_to_page(pmdp);
-
-	if (!pmd_page || !pfn_valid(page_to_pfn(pmd_page)) ||
-	    !pmd_page->pt_replica)
-		return native_pmdp_get_and_clear(pmdp);
-
-	val = 0;
-	offset = ((unsigned long)pmdp) & ~PAGE_MASK;
-	start_page = pmd_page;
-	cur_page = pmd_page;
-
-	do {
-		pmd_t *replica_entry = (pmd_t *)(page_address(cur_page) + offset);
-		pmd_t old_entry = native_pmdp_get_and_clear(replica_entry);
-
-		val |= pmd_val(old_entry);
-		cur_page = cur_page->pt_replica;
-	} while (cur_page && cur_page != start_page);
-	return __pmd(val);
+	return __pmd(repl_get_and_clear_entry(pmdp));
 }
 
 void pgtable_repl_pmdp_set_wrprotect(struct mm_struct *mm,
 				     unsigned long addr, pmd_t *pmdp)
 {
-	struct page *pmd_page;
-	struct page *cur_page;
-	struct page *start_page;
-	unsigned long offset;
-	pmd_t old_pmd, new_pmd;
-
-	if (!pmdp || !virt_addr_valid(pmdp))
-		goto native_only;
-
-	pmd_page = virt_to_page(pmdp);
-
-	if (!pmd_page || !pfn_valid(page_to_pfn(pmd_page)))
-		goto native_only;
-
-	if (!pmd_page->pt_replica) {
-		old_pmd = READ_ONCE(*pmdp);
-		do {
-			new_pmd = pmd_wrprotect(old_pmd);
-		} while (!try_cmpxchg((long *)pmdp, (long *)&old_pmd, *(long *)&new_pmd));
-		return;
-	}
-
-	offset = ((unsigned long)pmdp) & ~PAGE_MASK;
-	start_page = pmd_page;
-	cur_page = pmd_page;
-
-	do {
-		pmd_t *replica_entry = (pmd_t *)(page_address(cur_page) + offset);
-
-		if (pmd_present(*replica_entry)) {
-			old_pmd = READ_ONCE(*replica_entry);
-			do {
-				new_pmd = pmd_wrprotect(old_pmd);
-			} while (!try_cmpxchg((long *)replica_entry, (long *)&old_pmd, *(long *)&new_pmd));
-		}
-		cur_page = cur_page->pt_replica;
-	} while (cur_page && cur_page != start_page);
-	return;
-
-native_only:
-	old_pmd = READ_ONCE(*pmdp);
-	do {
-		new_pmd = pmd_wrprotect(old_pmd);
-	} while (!try_cmpxchg((long *)pmdp, (long *)&old_pmd, *(long *)&new_pmd));
+	repl_set_wrprotect_entry(pmdp);
 }
 
 void pgtable_repl_free_pte_replicas(struct mm_struct *mm, struct page *page)
@@ -655,91 +611,10 @@ native_only:
 int pgtable_repl_pmdp_test_and_clear_young(struct vm_area_struct *vma,
 					   unsigned long addr, pmd_t *pmdp)
 {
-	struct page *pmd_page;
-	struct page *cur_page;
-	struct page *start_page;
-	unsigned long offset;
-	int ret = 0;
-
-	if (!pmdp || !virt_addr_valid(pmdp))
-		goto native_only;
-
-	pmd_page = virt_to_page(pmdp);
-
-	if (!pmd_page || !pfn_valid(page_to_pfn(pmd_page)))
-		goto native_only;
-
-	if (!pmd_page->pt_replica) {
-		if (pmd_young(*pmdp))
-			ret = test_and_clear_bit(_PAGE_BIT_ACCESSED,
-						 (unsigned long *)pmdp);
-		return ret;
-	}
-
-	offset = ((unsigned long)pmdp) & ~PAGE_MASK;
-	start_page = pmd_page;
-	cur_page = pmd_page;
-
-	do {
-		pmd_t *replica_entry = (pmd_t *)(page_address(cur_page) + offset);
-
-		if (pmd_present(*replica_entry) && pmd_young(*replica_entry)) {
-			if (test_and_clear_bit(_PAGE_BIT_ACCESSED,
-					       (unsigned long *)replica_entry))
-				ret = 1;
-		}
-		cur_page = cur_page->pt_replica;
-	} while (cur_page && cur_page != start_page);
-	return ret;
-
-native_only:
-	if (pmd_young(*pmdp))
-		ret = test_and_clear_bit(_PAGE_BIT_ACCESSED,
-					 (unsigned long *)pmdp);
-	return ret;
+	return repl_test_and_clear_young_entry(pmdp);
 }
 
 pmd_t pgtable_repl_get_pmd(pmd_t *pmdp)
 {
-	struct page *pmd_page;
-	struct page *cur_page;
-	struct page *start_page;
-	unsigned long offset;
-	pmdval_t val;
-
-	if (!pmdp)
-		return __pmd(0);
-
-	if (!virt_addr_valid(pmdp))
-		return *pmdp;
-
-	pmd_page = virt_to_page(pmdp);
-
-	if (!pmd_page || !pfn_valid(page_to_pfn(pmd_page)) ||
-	    !pmd_page->pt_replica)
-		return *pmdp;
-
-	val = 0;
-	offset = ((unsigned long)pmdp) & ~PAGE_MASK;
-	start_page = pmd_page;
-	cur_page = pmd_page;
-
-	do {
-		pmd_t *replica_entry = (pmd_t *)(page_address(cur_page) + offset);
-		pmd_t entry_val = *replica_entry;
-
-		if (cur_page == start_page) {
-			val = pmd_val(entry_val);
-			if (!pmd_present(entry_val))
-				break;
-		} else if (pmd_present(entry_val)) {
-			val |= pmd_flags(entry_val);
-		}
-		cur_page = cur_page->pt_replica;
-	} while (cur_page && cur_page != start_page);
-
-	{
-		pmd_t ret = __pmd(val);
-		return ret;
-	}
+	return __pmd(repl_get_entry(pmdp));
 }

@@ -65,6 +65,34 @@ struct page *get_replica_for_node(struct page *base, int target_node)
 	return NULL;
 }
 
+typedef int (*alloc_replicas_fn_t)(struct page *, struct mm_struct *,
+				   struct page **, int *);
+
+static void replicate_entry_page(unsigned long entry_phys, struct mm_struct *mm,
+				 alloc_replicas_fn_t alloc_fn)
+{
+	struct page *child_page;
+	struct page *pages[NUMA_NODE_COUNT];
+	int count = 0;
+	int i, ret;
+	void *src;
+
+	if (!entry_phys)
+		return;
+
+	child_page = pfn_to_page(entry_phys >> PAGE_SHIFT);
+	if (child_page->pt_replica)
+		return;
+
+	ret = alloc_fn(child_page, mm, pages, &count);
+	if (ret == 0 && count >= 2) {
+		src = page_address(child_page);
+		for (i = 1; i < count; i++)
+			memcpy(page_address(pages[i]), src, PAGE_SIZE);
+		BUG_ON(!link_page_replicas(pages, count));
+	}
+}
+
 static void replicate_existing_pagetables_phase1(struct mm_struct *mm)
 {
 	pgd_t *pgd;
@@ -83,28 +111,9 @@ static void replicate_existing_pagetables_phase1(struct mm_struct *mm)
 		if (pgd_none(pgdval) || !pgd_present(pgdval))
 			continue;
 
-		if (pgtable_l5_enabled()) {
-			unsigned long child_phys = pgd_val(pgdval) & PTE_PFN_MASK;
-
-			if (child_phys) {
-				struct page *child_page = pfn_to_page(child_phys >> PAGE_SHIFT);
-
-				if (!child_page->pt_replica) {
-					struct page *pages[NUMA_NODE_COUNT];
-					int count = 0;
-					int i, ret;
-					void *src;
-
-					ret = alloc_p4d_replicas(child_page, mm, pages, &count);
-					if (ret == 0 && count >= 2) {
-						src = page_address(child_page);
-						for (i = 1; i < count; i++)
-							memcpy(page_address(pages[i]), src, PAGE_SIZE);
-						BUG_ON(!link_page_replicas(pages, count));
-					}
-				}
-			}
-		}
+		if (pgtable_l5_enabled())
+			replicate_entry_page(pgd_val(pgdval) & PTE_PFN_MASK,
+					     mm, alloc_p4d_replicas);
 
 		p4d_base = p4d_offset(&pgd[pgd_idx], 0);
 
@@ -116,28 +125,8 @@ static void replicate_existing_pagetables_phase1(struct mm_struct *mm)
 			if (p4d_none(p4dval) || !p4d_present(p4dval))
 				continue;
 
-			{
-				unsigned long pud_phys = p4d_val(p4dval) & PTE_PFN_MASK;
-
-				if (pud_phys) {
-					struct page *pud_page = pfn_to_page(pud_phys >> PAGE_SHIFT);
-
-					if (!pud_page->pt_replica) {
-						struct page *pages[NUMA_NODE_COUNT];
-						int count = 0;
-						int i, ret;
-						void *src;
-
-						ret = alloc_pud_replicas(pud_page, mm, pages, &count);
-						if (ret == 0 && count >= 2) {
-							src = page_address(pud_page);
-							for (i = 1; i < count; i++)
-								memcpy(page_address(pages[i]), src, PAGE_SIZE);
-							BUG_ON(!link_page_replicas(pages, count));
-						}
-					}
-				}
-			}
+			replicate_entry_page(p4d_val(p4dval) & PTE_PFN_MASK,
+					     mm, alloc_pud_replicas);
 
 			pud_base = pud_offset(&p4d_base[p4d_idx], 0);
 
@@ -149,28 +138,8 @@ static void replicate_existing_pagetables_phase1(struct mm_struct *mm)
 				if (pud_none(pudval) || !pud_present(pudval) || pud_trans_huge(pudval))
 					continue;
 
-				{
-					unsigned long pmd_phys = pud_val(pudval) & PTE_PFN_MASK;
-
-					if (pmd_phys) {
-						struct page *pmd_page = pfn_to_page(pmd_phys >> PAGE_SHIFT);
-
-						if (!pmd_page->pt_replica) {
-							struct page *pages[NUMA_NODE_COUNT];
-							int count = 0;
-							int i, ret;
-							void *src;
-
-							ret = alloc_pmd_replicas(pmd_page, mm, pages, &count);
-							if (ret == 0 && count >= 2) {
-								src = page_address(pmd_page);
-								for (i = 1; i < count; i++)
-									memcpy(page_address(pages[i]), src, PAGE_SIZE);
-								BUG_ON(!link_page_replicas(pages, count));
-							}
-						}
-					}
-				}
+				replicate_entry_page(pud_val(pudval) & PTE_PFN_MASK,
+						     mm, alloc_pmd_replicas);
 
 				pmd_base = pmd_offset(&pud_base[pud_idx], 0);
 
@@ -181,34 +150,38 @@ static void replicate_existing_pagetables_phase1(struct mm_struct *mm)
 					if (pmd_none(pmdval) || !pmd_present(pmdval) || pmd_trans_huge(pmdval))
 						continue;
 
-					{
-						unsigned long pte_phys = pmd_val(pmdval) & PTE_PFN_MASK;
-
-						if (pte_phys) {
-							struct page *pte_page = pfn_to_page(pte_phys >> PAGE_SHIFT);
-
-							if (!pte_page->pt_replica) {
-								struct page *pages[NUMA_NODE_COUNT];
-								int count = 0;
-								int i, ret;
-								void *src;
-
-								ret = alloc_pte_replicas(pte_page, mm, pages, &count);
-								if (ret == 0 && count >= 2) {
-									src = page_address(pte_page);
-									for (i = 1; i < count; i++)
-										memcpy(page_address(pages[i]), src, PAGE_SIZE);
-									BUG_ON(!link_page_replicas(pages, count));
-								}
-							}
-						}
-					}
+					replicate_entry_page(pmd_val(pmdval) & PTE_PFN_MASK,
+							     mm, alloc_pte_replicas);
 				}
 			}
 		}
 	}
 
 	smp_mb();
+}
+
+static struct page *find_local_replica_for_rewrite(unsigned long entry_val,
+						   int node,
+						   struct page **orig_page_out)
+{
+	unsigned long child_phys;
+	struct page *child_page, *local_child;
+
+	child_phys = entry_val & PTE_PFN_MASK;
+	if (!child_phys)
+		return NULL;
+
+	child_page = pfn_to_page(child_phys >> PAGE_SHIFT);
+	if (!child_page->pt_replica)
+		return NULL;
+
+	local_child = get_replica_for_node(child_page, node);
+	if (!local_child || page_to_nid(local_child) != node)
+		return NULL;
+
+	if (orig_page_out)
+		*orig_page_out = child_page;
+	return local_child;
 }
 
 static void replicate_existing_pagetables_phase2(struct mm_struct *mm)
@@ -245,35 +218,28 @@ static void replicate_existing_pagetables_phase2(struct mm_struct *mm)
 		for (pgd_idx = 0; pgd_idx < KERNEL_PGD_BOUNDARY; pgd_idx++) {
 			pgd_t pgdval;
 			p4d_t *node_p4d_base;
-			unsigned long child_phys;
-			struct page *child_page;
+			struct page *local_child;
 			int p4d_idx;
 
 			pgdval = READ_ONCE(node_pgd[pgd_idx]);
 			if (pgd_none(pgdval) || !pgd_present(pgdval))
 				continue;
 
-			child_phys = pgd_val(pgdval) & PTE_PFN_MASK;
-			if (child_phys) {
-				child_page = pfn_to_page(child_phys >> PAGE_SHIFT);
-				if (child_page->pt_replica) {
-					struct page *local_child = get_replica_for_node(child_page, node);
+			local_child = find_local_replica_for_rewrite(
+				pgd_val(pgdval), node, NULL);
+			if (local_child) {
+				unsigned long new_phys = __pa(page_address(local_child));
+				pgdval_t new_val = new_phys | (pgd_val(pgdval) & ~PTE_PFN_MASK);
 
-					if (local_child && page_to_nid(local_child) == node) {
-						unsigned long new_phys = __pa(page_address(local_child));
-						pgdval_t new_val = new_phys | (pgd_val(pgdval) & ~PTE_PFN_MASK);
+				WRITE_ONCE(node_pgd[pgd_idx], __pgd(new_val));
 
-						WRITE_ONCE(node_pgd[pgd_idx], __pgd(new_val));
+				if (mitosis_pti_active()) {
+					pgd_t *user_entry = mitosis_get_user_pgd_entry(&node_pgd[pgd_idx]);
 
-						if (mitosis_pti_active()) {
-							pgd_t *user_entry = mitosis_get_user_pgd_entry(&node_pgd[pgd_idx]);
+					if (user_entry) {
+						pgdval_t user_flags = pgd_val(*user_entry) & ~PTE_PFN_MASK;
 
-							if (user_entry) {
-								pgdval_t user_flags = pgd_val(*user_entry) & ~PTE_PFN_MASK;
-
-								WRITE_ONCE(*user_entry, __pgd(new_phys | user_flags));
-							}
-						}
+						WRITE_ONCE(*user_entry, __pgd(new_phys | user_flags));
 					}
 				}
 			}
@@ -289,19 +255,13 @@ static void replicate_existing_pagetables_phase2(struct mm_struct *mm)
 				if (p4d_none(p4dval) || !p4d_present(p4dval))
 					continue;
 
-				child_phys = p4d_val(p4dval) & PTE_PFN_MASK;
-				if (child_phys) {
-					child_page = pfn_to_page(child_phys >> PAGE_SHIFT);
-					if (child_page->pt_replica) {
-						struct page *local_child = get_replica_for_node(child_page, node);
+				local_child = find_local_replica_for_rewrite(
+					p4d_val(p4dval), node, NULL);
+				if (local_child) {
+					unsigned long new_phys = __pa(page_address(local_child));
+					p4dval_t new_val = new_phys | (p4d_val(p4dval) & ~PTE_PFN_MASK);
 
-						if (local_child && page_to_nid(local_child) == node) {
-							unsigned long new_phys = __pa(page_address(local_child));
-							p4dval_t new_val = new_phys | (p4d_val(p4dval) & ~PTE_PFN_MASK);
-
-							WRITE_ONCE(node_p4d_base[p4d_idx], __p4d(new_val));
-						}
-					}
+					WRITE_ONCE(node_p4d_base[p4d_idx], __p4d(new_val));
 				}
 
 				node_pud_base = pud_offset(&node_p4d_base[p4d_idx], 0);
@@ -315,30 +275,28 @@ static void replicate_existing_pagetables_phase2(struct mm_struct *mm)
 					if (pud_none(pudval) || !pud_present(pudval) || pud_trans_huge(pudval))
 						continue;
 
-					child_phys = pud_val(pudval) & PTE_PFN_MASK;
-					if (child_phys) {
-						child_page = pfn_to_page(child_phys >> PAGE_SHIFT);
-						if (child_page->pt_replica) {
-							struct page *local_child = get_replica_for_node(child_page, node);
+					{
+						struct page *orig_page;
 
-							if (local_child && page_to_nid(local_child) == node) {
-								unsigned long new_phys = __pa(page_address(local_child));
-								pudval_t new_val = new_phys | (pud_val(pudval) & ~PTE_PFN_MASK);
+						local_child = find_local_replica_for_rewrite(
+							pud_val(pudval), node, &orig_page);
+						if (local_child) {
+							unsigned long new_phys = __pa(page_address(local_child));
+							pudval_t new_val = new_phys | (pud_val(pudval) & ~PTE_PFN_MASK);
 
-								if (node == primary_node &&
-								    local_child != child_page) {
-									struct ptdesc *orig_ptdesc = page_ptdesc(child_page);
-									struct ptdesc *local_ptdesc = page_ptdesc(local_child);
+							if (node == primary_node &&
+							    local_child != orig_page) {
+								struct ptdesc *orig_ptdesc = page_ptdesc(orig_page);
+								struct ptdesc *local_ptdesc = page_ptdesc(local_child);
 
-									if (orig_ptdesc->pmd_huge_pte &&
-									    !local_ptdesc->pmd_huge_pte) {
-										local_ptdesc->pmd_huge_pte = orig_ptdesc->pmd_huge_pte;
-										orig_ptdesc->pmd_huge_pte = NULL;
-									}
+								if (orig_ptdesc->pmd_huge_pte &&
+								    !local_ptdesc->pmd_huge_pte) {
+									local_ptdesc->pmd_huge_pte = orig_ptdesc->pmd_huge_pte;
+									orig_ptdesc->pmd_huge_pte = NULL;
 								}
-
-								WRITE_ONCE(node_pud_base[pud_idx], __pud(new_val));
 							}
+
+							WRITE_ONCE(node_pud_base[pud_idx], __pud(new_val));
 						}
 					}
 
@@ -351,19 +309,13 @@ static void replicate_existing_pagetables_phase2(struct mm_struct *mm)
 						if (pmd_none(pmdval) || !pmd_present(pmdval) || pmd_trans_huge(pmdval))
 							continue;
 
-						child_phys = pmd_val(pmdval) & PTE_PFN_MASK;
-						if (child_phys) {
-							child_page = pfn_to_page(child_phys >> PAGE_SHIFT);
-							if (child_page->pt_replica) {
-								struct page *local_child = get_replica_for_node(child_page, node);
+						local_child = find_local_replica_for_rewrite(
+							pmd_val(pmdval), node, NULL);
+						if (local_child) {
+							unsigned long new_phys = __pa(page_address(local_child));
+							pmdval_t new_val = new_phys | (pmd_val(pmdval) & ~PTE_PFN_MASK);
 
-								if (local_child && page_to_nid(local_child) == node) {
-									unsigned long new_phys = __pa(page_address(local_child));
-									pmdval_t new_val = new_phys | (pmd_val(pmdval) & ~PTE_PFN_MASK);
-
-									WRITE_ONCE(node_pmd_base[pmd_idx], __pmd(new_val));
-								}
-							}
+							WRITE_ONCE(node_pmd_base[pmd_idx], __pmd(new_val));
 						}
 					}
 				}
@@ -668,7 +620,7 @@ int mitosis_inherit_sysctl_handler(struct ctl_table *table, int write,
 	return 0;
 }
 
-struct mitosis_enable_work {
+struct mitosis_task_work {
 	struct callback_head twork;
 	int result;
 	struct completion done;
@@ -676,69 +628,35 @@ struct mitosis_enable_work {
 
 static void mitosis_enable_task_work_fn(struct callback_head *head)
 {
-	struct mitosis_enable_work *work =
-		container_of(head, struct mitosis_enable_work, twork);
+	struct mitosis_task_work *work =
+		container_of(head, struct mitosis_task_work, twork);
 
 	work->result = pgtable_repl_enable(current->mm);
 	complete(&work->done);
 }
 
-int pgtable_repl_enable_external(struct task_struct *target)
-{
-	struct mitosis_enable_work work;
-	int ret;
-
-	if (target == current)
-		return pgtable_repl_enable(current->mm);
-
-	if (!target->mm)
-		return -EINVAL;
-
-	init_completion(&work.done);
-	work.result = -EINVAL;
-	init_task_work(&work.twork, mitosis_enable_task_work_fn);
-
-	ret = task_work_add(target, &work.twork, TWA_SIGNAL);
-	if (ret)
-		return ret;
-
-	wait_for_completion(&work.done);
-
-	return work.result;
-}
-
-struct mitosis_disable_work {
-	struct callback_head twork;
-	int result;
-	struct completion done;
-};
-
 static void mitosis_disable_task_work_fn(struct callback_head *head)
 {
-	struct mitosis_disable_work *work =
-		container_of(head, struct mitosis_disable_work, twork);
+	struct mitosis_task_work *work =
+		container_of(head, struct mitosis_task_work, twork);
 
 	pgtable_repl_disable(current->mm);
 	work->result = 0;
 	complete(&work->done);
 }
 
-int pgtable_repl_disable_external(struct task_struct *target)
+static int mitosis_run_on_target(struct task_struct *target,
+				 void (*fn)(struct callback_head *))
 {
-	struct mitosis_disable_work work;
+	struct mitosis_task_work work;
 	int ret;
-
-	if (target == current) {
-		pgtable_repl_disable(current->mm);
-		return 0;
-	}
 
 	if (!target->mm)
 		return -EINVAL;
 
 	init_completion(&work.done);
 	work.result = -EINVAL;
-	init_task_work(&work.twork, mitosis_disable_task_work_fn);
+	init_task_work(&work.twork, fn);
 
 	ret = task_work_add(target, &work.twork, TWA_SIGNAL);
 	if (ret)
@@ -746,6 +664,24 @@ int pgtable_repl_disable_external(struct task_struct *target)
 
 	wait_for_completion(&work.done);
 	return work.result;
+}
+
+int pgtable_repl_enable_external(struct task_struct *target)
+{
+	if (target == current)
+		return pgtable_repl_enable(current->mm);
+
+	return mitosis_run_on_target(target, mitosis_enable_task_work_fn);
+}
+
+int pgtable_repl_disable_external(struct task_struct *target)
+{
+	if (target == current) {
+		pgtable_repl_disable(current->mm);
+		return 0;
+	}
+
+	return mitosis_run_on_target(target, mitosis_disable_task_work_fn);
 }
 
 static int __init mitosis_check_numa_node_count(void)

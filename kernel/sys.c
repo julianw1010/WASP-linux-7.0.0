@@ -2534,6 +2534,52 @@ static int prctl_set_thp_disable(bool thp_disable, unsigned long flags,
 	return 0;
 }
 
+static struct mm_struct *mitosis_prctl_get_target_mm(pid_t target_pid,
+						     struct task_struct **out_task)
+{
+	struct mm_struct *mm;
+	struct task_struct *task;
+
+	if (target_pid != 0) {
+		rcu_read_lock();
+		task = find_task_by_vpid(target_pid);
+		if (task)
+			get_task_struct(task);
+		rcu_read_unlock();
+
+		if (!task) {
+			*out_task = NULL;
+			return ERR_PTR(-ESRCH);
+		}
+
+		mm = get_task_mm(task);
+	} else {
+		task = current;
+		mm = current->mm;
+		if (mm)
+			mmget(mm);
+	}
+
+	*out_task = task;
+
+	if (!mm) {
+		if (target_pid != 0)
+			put_task_struct(task);
+		return ERR_PTR(-EINVAL);
+	}
+
+	return mm;
+}
+
+static void mitosis_prctl_put_target_mm(struct mm_struct *mm,
+					struct task_struct *task,
+					pid_t target_pid)
+{
+	mmput(mm);
+	if (target_pid != 0)
+		put_task_struct(task);
+}
+
 SYSCALL_DEFINE5(prctl, int, option, unsigned long, arg2, unsigned long, arg3,
 		unsigned long, arg4, unsigned long, arg5)
 {
@@ -2912,8 +2958,8 @@ SYSCALL_DEFINE5(prctl, int, option, unsigned long, arg2, unsigned long, arg3,
 		break;
 	case PR_SET_PGTABLE_REPL:
 	{
-		struct mm_struct *mm = NULL;
-		struct task_struct *task = NULL;
+		struct mm_struct *mm;
+		struct task_struct *task;
 		pid_t target_pid = (pid_t)arg3;
 		bool is_external = (target_pid != 0);
 		int ret;
@@ -2923,30 +2969,9 @@ SYSCALL_DEFINE5(prctl, int, option, unsigned long, arg2, unsigned long, arg3,
 			break;
 		}
 
-		if (target_pid != 0) {
-			rcu_read_lock();
-			task = find_task_by_vpid(target_pid);
-			if (task)
-				get_task_struct(task);
-			rcu_read_unlock();
-
-			if (!task) {
-				error = -ESRCH;
-				break;
-			}
-
-			mm = get_task_mm(task);
-		} else {
-			task = current;
-			mm = current->mm;
-			if (mm)
-				mmget(mm);
-		}
-
-		if (!mm) {
-			if (target_pid != 0)
-				put_task_struct(task);
-			error = -EINVAL;
+		mm = mitosis_prctl_get_target_mm(target_pid, &task);
+		if (IS_ERR(mm)) {
+			error = PTR_ERR(mm);
 			break;
 		}
 
@@ -2996,114 +3021,72 @@ SYSCALL_DEFINE5(prctl, int, option, unsigned long, arg2, unsigned long, arg3,
 		}
 
 	out_put_mm:
-		mmput(mm);
-		if (target_pid != 0)
-			put_task_struct(task);
+		mitosis_prctl_put_target_mm(mm, task, target_pid);
 		break;
 	}
 	case PR_GET_PGTABLE_REPL:
 	{
-		if (current->mm && current->mm->repl_pgd_enabled)
-			error = 1;
-		else
-			error = 0;
+		struct mm_struct *mm;
+		struct task_struct *task;
+		pid_t target_pid = (pid_t)arg2;
+
+		mm = mitosis_prctl_get_target_mm(target_pid, &task);
+		if (IS_ERR(mm)) {
+			error = PTR_ERR(mm);
+			break;
+		}
+
+		error = mm->repl_pgd_enabled ? 1 : 0;
+
+		mitosis_prctl_put_target_mm(mm, task, target_pid);
 		break;
 	}
 	case PR_SET_PGTABLE_CACHE_ONLY:
 	{
-		struct mm_struct *mm = NULL;
-		struct task_struct *task = NULL;
+		struct mm_struct *mm;
+		struct task_struct *task;
 		pid_t target_pid = (pid_t)arg3;
 		bool enable = (arg2 != 0);
 
-		if (target_pid != 0) {
-			rcu_read_lock();
-			task = find_task_by_vpid(target_pid);
-			if (task)
-				get_task_struct(task);
-			rcu_read_unlock();
-
-			if (!task) {
-				error = -ESRCH;
-				break;
-			}
-
-			mm = get_task_mm(task);
-		} else {
-			task = current;
-			mm = current->mm;
-			if (mm)
-				mmget(mm);
-		}
-
-		if (!mm) {
-			if (target_pid != 0)
-				put_task_struct(task);
-			error = -EINVAL;
+		mm = mitosis_prctl_get_target_mm(target_pid, &task);
+		if (IS_ERR(mm)) {
+			error = PTR_ERR(mm);
 			break;
 		}
 
 		if (enable && mm->repl_pgd_enabled) {
 			error = -EBUSY;
-			mmput(mm);
-			if (target_pid != 0)
-				put_task_struct(task);
+			mitosis_prctl_put_target_mm(mm, task, target_pid);
 			break;
 		}
 
 		WRITE_ONCE(mm->cache_only_mode, enable);
-
 		error = 0;
 
-		mmput(mm);
-		if (target_pid != 0)
-			put_task_struct(task);
+		mitosis_prctl_put_target_mm(mm, task, target_pid);
 		break;
 	}
 	case PR_GET_PGTABLE_CACHE_ONLY:
 	{
-		struct mm_struct *mm = NULL;
-		struct task_struct *task = NULL;
+		struct mm_struct *mm;
+		struct task_struct *task;
 		pid_t target_pid = (pid_t)arg2;
 
-		if (target_pid != 0) {
-			rcu_read_lock();
-			task = find_task_by_vpid(target_pid);
-			if (task)
-				get_task_struct(task);
-			rcu_read_unlock();
-
-			if (!task) {
-				error = -ESRCH;
-				break;
-			}
-
-			mm = get_task_mm(task);
-		} else {
-			task = current;
-			mm = current->mm;
-			if (mm)
-				mmget(mm);
-		}
-
-		if (!mm) {
-			if (target_pid != 0)
-				put_task_struct(task);
-			error = -EINVAL;
+		mm = mitosis_prctl_get_target_mm(target_pid, &task);
+		if (IS_ERR(mm)) {
+			error = PTR_ERR(mm);
 			break;
 		}
 
 		error = READ_ONCE(mm->cache_only_mode) ? 1 : 0;
 
-		mmput(mm);
-		if (target_pid != 0)
-			put_task_struct(task);
+		mitosis_prctl_put_target_mm(mm, task, target_pid);
 		break;
 	}
 	case PR_SET_PGTABLE_REPL_STEERING:
 	{
-		struct mm_struct *mm = NULL;
-		struct task_struct *task = NULL;
+		struct mm_struct *mm;
+		struct task_struct *task;
 		int steering[NUMA_NODE_COUNT];
 		int old_steering[NUMA_NODE_COUNT];
 		int __user *user_steering = (int __user *)arg2;
@@ -3130,30 +3113,9 @@ SYSCALL_DEFINE5(prctl, int, option, unsigned long, arg2, unsigned long, arg3,
 		if (error)
 			break;
 
-		if (target_pid != 0) {
-			rcu_read_lock();
-			task = find_task_by_vpid(target_pid);
-			if (task)
-				get_task_struct(task);
-			rcu_read_unlock();
-
-			if (!task) {
-				error = -ESRCH;
-				break;
-			}
-
-			mm = get_task_mm(task);
-		} else {
-			task = current;
-			mm = current->mm;
-			if (mm)
-				mmget(mm);
-		}
-
-		if (!mm) {
-			if (target_pid != 0)
-				put_task_struct(task);
-			error = -EINVAL;
+		mm = mitosis_prctl_get_target_mm(target_pid, &task);
+		if (IS_ERR(mm)) {
+			error = PTR_ERR(mm);
 			break;
 		}
 
@@ -3194,15 +3156,13 @@ SYSCALL_DEFINE5(prctl, int, option, unsigned long, arg2, unsigned long, arg3,
 		error = 0;
 
 	out_put_mm_steering:
-		mmput(mm);
-		if (target_pid != 0)
-			put_task_struct(task);
+		mitosis_prctl_put_target_mm(mm, task, target_pid);
 		break;
 	}
 	case PR_GET_PGTABLE_REPL_STEERING:
 	{
-		struct mm_struct *mm = NULL;
-		struct task_struct *task = NULL;
+		struct mm_struct *mm;
+		struct task_struct *task;
 		int steering[NUMA_NODE_COUNT];
 		int __user *user_steering = (int __user *)arg2;
 		pid_t target_pid = (pid_t)arg3;
@@ -3213,30 +3173,9 @@ SYSCALL_DEFINE5(prctl, int, option, unsigned long, arg2, unsigned long, arg3,
 			break;
 		}
 
-		if (target_pid != 0) {
-			rcu_read_lock();
-			task = find_task_by_vpid(target_pid);
-			if (task)
-				get_task_struct(task);
-			rcu_read_unlock();
-
-			if (!task) {
-				error = -ESRCH;
-				break;
-			}
-
-			mm = get_task_mm(task);
-		} else {
-			task = current;
-			mm = current->mm;
-			if (mm)
-				mmget(mm);
-		}
-
-		if (!mm) {
-			if (target_pid != 0)
-				put_task_struct(task);
-			error = -EINVAL;
+		mm = mitosis_prctl_get_target_mm(target_pid, &task);
+		if (IS_ERR(mm)) {
+			error = PTR_ERR(mm);
 			break;
 		}
 
@@ -3248,9 +3187,7 @@ SYSCALL_DEFINE5(prctl, int, option, unsigned long, arg2, unsigned long, arg3,
 		else
 			error = 0;
 
-		mmput(mm);
-		if (target_pid != 0)
-			put_task_struct(task);
+		mitosis_prctl_put_target_mm(mm, task, target_pid);
 		break;
 	}
 	default:

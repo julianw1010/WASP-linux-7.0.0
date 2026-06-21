@@ -108,6 +108,26 @@ static inline pgtable_t pte_alloc_one_noprof(struct mm_struct *mm, pmd_t *pmd)
 #define pte_alloc_one(...)	alloc_hooks(pte_alloc_one_noprof(__VA_ARGS__))
 #endif
 
+static inline void mitosis_dtor_free_page(struct page *page, int level)
+{
+	struct ptdesc *ptdesc = page_ptdesc(page);
+	int nid = page_to_nid(page);
+	bool from_cache = PageMitosisFromCache(page);
+
+	pagetable_dtor(ptdesc);
+
+	page->pt_owner_mm = NULL;
+	ClearPageMitosisFromCache(page);
+
+	if (from_cache) {
+		page->pt_replica = NULL;
+		if (mitosis_cache_push(page, nid, level))
+			return;
+	}
+
+	pagetable_free(ptdesc);
+}
+
 /*
  * Should really implement gc for free page table pages. This could be
  * done with a reference count in struct page.
@@ -120,23 +140,8 @@ static inline pgtable_t pte_alloc_one_noprof(struct mm_struct *mm, pmd_t *pmd)
  */
 static inline void pte_free(struct mm_struct *mm, struct page *pte_page)
 {
-	struct ptdesc *ptdesc = page_ptdesc(pte_page);
-	int nid = page_to_nid(pte_page);
-	bool from_cache = PageMitosisFromCache(pte_page);
-
 	pgtable_repl_free_pte_replicas(mm, pte_page);
-	pagetable_dtor(ptdesc);
-
-	pte_page->pt_owner_mm = NULL;
-	ClearPageMitosisFromCache(pte_page);
-
-	if (from_cache) {
-		pte_page->pt_replica = NULL;
-		if (mitosis_cache_push(pte_page, nid, MITOSIS_CACHE_PTE))
-			return;
-	}
-
-	pagetable_free(ptdesc);
+	mitosis_dtor_free_page(pte_page, MITOSIS_CACHE_PTE);
 }
 
 #if CONFIG_PGTABLE_LEVELS > 2
@@ -191,24 +196,8 @@ static inline pmd_t *pmd_alloc_one_noprof(struct mm_struct *mm, unsigned long ad
 #ifndef __HAVE_ARCH_PMD_FREE
 static inline void pmd_free(struct mm_struct *mm, pmd_t *pmd)
 {
-	struct ptdesc *ptdesc = virt_to_ptdesc(pmd);
-	struct page *page = ptdesc_page(ptdesc);
-	int nid = page_to_nid(page);
-	bool from_cache = PageMitosisFromCache(page);
-
 	BUG_ON((unsigned long)pmd & (PAGE_SIZE-1));
-	pagetable_dtor(ptdesc);
-
-	page->pt_owner_mm = NULL;
-	ClearPageMitosisFromCache(page);
-
-	if (from_cache) {
-		page->pt_replica = NULL;
-		if (mitosis_cache_push(page, nid, MITOSIS_CACHE_PMD))
-			return;
-	}
-
-	pagetable_free(ptdesc);
+	mitosis_dtor_free_page(ptdesc_page(virt_to_ptdesc(pmd)), MITOSIS_CACHE_PMD);
 }
 #endif
 
@@ -267,24 +256,8 @@ static inline pud_t *pud_alloc_one_noprof(struct mm_struct *mm, unsigned long ad
 
 static inline void __pud_free(struct mm_struct *mm, pud_t *pud)
 {
-	struct ptdesc *ptdesc = virt_to_ptdesc(pud);
-	struct page *page = ptdesc_page(ptdesc);
-	int nid = page_to_nid(page);
-	bool from_cache = PageMitosisFromCache(page);
-
 	BUG_ON((unsigned long)pud & (PAGE_SIZE-1));
-	pagetable_dtor(ptdesc);
-
-	page->pt_owner_mm = NULL;
-	ClearPageMitosisFromCache(page);
-
-	if (from_cache) {
-		page->pt_replica = NULL;
-		if (mitosis_cache_push(page, nid, MITOSIS_CACHE_PUD))
-			return;
-	}
-
-	pagetable_free(ptdesc);
+	mitosis_dtor_free_page(ptdesc_page(virt_to_ptdesc(pud)), MITOSIS_CACHE_PUD);
 }
 
 #ifndef __HAVE_ARCH_PUD_FREE
@@ -340,24 +313,8 @@ static inline p4d_t *p4d_alloc_one_noprof(struct mm_struct *mm, unsigned long ad
 
 static inline void __p4d_free(struct mm_struct *mm, p4d_t *p4d)
 {
-	struct ptdesc *ptdesc = virt_to_ptdesc(p4d);
-	struct page *page = ptdesc_page(ptdesc);
-	int nid = page_to_nid(page);
-	bool from_cache = PageMitosisFromCache(page);
-
 	BUG_ON((unsigned long)p4d & (PAGE_SIZE-1));
-	pagetable_dtor(ptdesc);
-
-	page->pt_owner_mm = NULL;
-	ClearPageMitosisFromCache(page);
-
-	if (from_cache) {
-		page->pt_replica = NULL;
-		if (mitosis_cache_push(page, nid, MITOSIS_CACHE_P4D))
-			return;
-	}
-
-	pagetable_free(ptdesc);
+	mitosis_dtor_free_page(ptdesc_page(virt_to_ptdesc(p4d)), MITOSIS_CACHE_P4D);
 }
 
 #ifndef __HAVE_ARCH_P4D_FREE
