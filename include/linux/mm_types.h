@@ -1159,8 +1159,7 @@ struct mm_struct {
 #endif
 		unsigned long task_size;	/* size of task vm space */
 
-                bool repl_pgd_enabled;
-		bool repl_in_progress;
+		bool repl_pgd_enabled;
 		bool repl_pending_enable;
 		bool cache_only_mode;
 		nodemask_t repl_pgd_nodes;

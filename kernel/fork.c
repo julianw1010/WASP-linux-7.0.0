@@ -1116,7 +1116,6 @@ static struct mm_struct *mm_init(struct mm_struct *mm, struct task_struct *p,
 		goto fail_mm_init;
 
 	mm->repl_pgd_enabled = false;
-	mm->repl_in_progress = false;
 	mm->repl_pending_enable = false;
 	mm->cache_only_mode = false;
 	nodes_clear(mm->repl_pgd_nodes);

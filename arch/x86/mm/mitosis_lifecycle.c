@@ -71,7 +71,7 @@ static void replicate_existing_pagetables_phase1(struct mm_struct *mm)
 	pgd_t *pgd;
 	int pgd_idx, p4d_idx, pud_idx, pmd_idx;
 
-	if (!mm || !mm->repl_in_progress)
+	if (!mm)
 		return;
 
 	pgd = mm->pgd;
@@ -79,9 +79,6 @@ static void replicate_existing_pagetables_phase1(struct mm_struct *mm)
 	for (pgd_idx = 0; pgd_idx < KERNEL_PGD_BOUNDARY; pgd_idx++) {
 		pgd_t pgdval;
 		p4d_t *p4d_base;
-
-		if (!mm->repl_in_progress)
-			return;
 
 		pgdval = READ_ONCE(pgd[pgd_idx]);
 		if (pgd_none(pgdval) || !pgd_present(pgdval))
@@ -93,7 +90,7 @@ static void replicate_existing_pagetables_phase1(struct mm_struct *mm)
 			if (child_phys) {
 				struct page *child_page = pfn_to_page(child_phys >> PAGE_SHIFT);
 
-				if (mm->repl_in_progress && !child_page->pt_replica) {
+				if (!child_page->pt_replica) {
 					struct page *pages[NUMA_NODE_COUNT];
 					int count = 0;
 					int i, ret;
@@ -116,9 +113,6 @@ static void replicate_existing_pagetables_phase1(struct mm_struct *mm)
 			p4d_t p4dval;
 			pud_t *pud_base;
 
-			if (!mm->repl_in_progress)
-				return;
-
 			p4dval = READ_ONCE(p4d_base[p4d_idx]);
 			if (p4d_none(p4dval) || !p4d_present(p4dval))
 				continue;
@@ -129,7 +123,7 @@ static void replicate_existing_pagetables_phase1(struct mm_struct *mm)
 				if (pud_phys) {
 					struct page *pud_page = pfn_to_page(pud_phys >> PAGE_SHIFT);
 
-					if (mm->repl_in_progress && !pud_page->pt_replica) {
+					if (!pud_page->pt_replica) {
 						struct page *pages[NUMA_NODE_COUNT];
 						int count = 0;
 						int i, ret;
@@ -152,9 +146,6 @@ static void replicate_existing_pagetables_phase1(struct mm_struct *mm)
 				pud_t pudval;
 				pmd_t *pmd_base;
 
-				if (!mm->repl_in_progress)
-					return;
-
 				pudval = READ_ONCE(pud_base[pud_idx]);
 				if (pud_none(pudval) || !pud_present(pudval) || pud_trans_huge(pudval))
 					continue;
@@ -165,7 +156,7 @@ static void replicate_existing_pagetables_phase1(struct mm_struct *mm)
 					if (pmd_phys) {
 						struct page *pmd_page = pfn_to_page(pmd_phys >> PAGE_SHIFT);
 
-						if (mm->repl_in_progress && !pmd_page->pt_replica) {
+						if (!pmd_page->pt_replica) {
 							struct page *pages[NUMA_NODE_COUNT];
 							int count = 0;
 							int i, ret;
@@ -187,9 +178,6 @@ static void replicate_existing_pagetables_phase1(struct mm_struct *mm)
 				for (pmd_idx = 0; pmd_idx < PTRS_PER_PMD; pmd_idx++) {
 					pmd_t pmdval;
 
-					if (!mm->repl_in_progress)
-						return;
-
 					pmdval = READ_ONCE(pmd_base[pmd_idx]);
 					if (pmd_none(pmdval) || !pmd_present(pmdval) || pmd_trans_huge(pmdval))
 						continue;
@@ -200,7 +188,7 @@ static void replicate_existing_pagetables_phase1(struct mm_struct *mm)
 						if (pte_phys) {
 							struct page *pte_page = pfn_to_page(pte_phys >> PAGE_SHIFT);
 
-							if (mm->repl_in_progress && !pte_page->pt_replica) {
+							if (!pte_page->pt_replica) {
 								struct page *pages[NUMA_NODE_COUNT];
 								int count = 0;
 								int i, ret;
@@ -231,7 +219,7 @@ static void replicate_existing_pagetables_phase2(struct mm_struct *mm)
 	int node;
 	int primary_node;
 
-	if (!mm || !mm->repl_in_progress)
+	if (!mm)
 		return;
 
 	pgd = mm->pgd;
@@ -249,9 +237,6 @@ static void replicate_existing_pagetables_phase2(struct mm_struct *mm)
 		if (!node_isset(node, mm->repl_pgd_nodes))
 			continue;
 
-		if (!mm->repl_in_progress)
-			return;
-
 		node_pgd_page = get_replica_for_node(pgd_page, node);
 		if (!node_pgd_page || page_to_nid(node_pgd_page) != node)
 			continue;
@@ -264,9 +249,6 @@ static void replicate_existing_pagetables_phase2(struct mm_struct *mm)
 			unsigned long child_phys;
 			struct page *child_page;
 			int p4d_idx;
-
-			if (!mm->repl_in_progress)
-				return;
 
 			pgdval = READ_ONCE(node_pgd[pgd_idx]);
 			if (pgd_none(pgdval) || !pgd_present(pgdval))
@@ -304,9 +286,6 @@ static void replicate_existing_pagetables_phase2(struct mm_struct *mm)
 				pud_t *node_pud_base;
 				int pud_idx;
 
-				if (!mm->repl_in_progress)
-					return;
-
 				p4dval = READ_ONCE(node_p4d_base[p4d_idx]);
 				if (p4d_none(p4dval) || !p4d_present(p4dval))
 					continue;
@@ -332,9 +311,6 @@ static void replicate_existing_pagetables_phase2(struct mm_struct *mm)
 					pud_t pudval;
 					pmd_t *node_pmd_base;
 					int pmd_idx;
-
-					if (!mm->repl_in_progress)
-						return;
 
 					pudval = READ_ONCE(node_pud_base[pud_idx]);
 					if (pud_none(pudval) || !pud_present(pudval) || pud_trans_huge(pudval))
@@ -371,9 +347,6 @@ static void replicate_existing_pagetables_phase2(struct mm_struct *mm)
 
 					for (pmd_idx = 0; pmd_idx < PTRS_PER_PMD; pmd_idx++) {
 						pmd_t pmdval;
-
-						if (!mm->repl_in_progress)
-							return;
 
 						pmdval = READ_ONCE(node_pmd_base[pmd_idx]);
 						if (pmd_none(pmdval) || !pmd_present(pmdval) || pmd_trans_huge(pmdval))
@@ -463,21 +436,19 @@ int pgtable_repl_enable(struct mm_struct *mm)
 	mm->repl_pgd_nodes = nodes;
 	memset(mm->pgd_replicas, 0, sizeof(mm->pgd_replicas));
 
-	for (i = 0; i < count; i++) {
-		int node_id = page_to_nid(pgd_pages[i]);
-
-		mm->pgd_replicas[node_id] = page_address(pgd_pages[i]);
-	}
-
 	mmap_write_lock(mm);
 
-	smp_store_release(&mm->repl_in_progress, true);
 	smp_store_release(&mm->repl_pgd_enabled, true);
 
 	replicate_existing_pagetables_phase1(mm);
 	replicate_existing_pagetables_phase2(mm);
 
-	smp_store_release(&mm->repl_in_progress, false);
+	for (i = 0; i < count; i++) {
+		int node_id = page_to_nid(pgd_pages[i]);
+
+		smp_store_release(&mm->pgd_replicas[node_id], page_address(pgd_pages[i]));
+	}
+	smp_mb();
 
 	mmap_write_unlock(mm);
 
