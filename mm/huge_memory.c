@@ -50,8 +50,6 @@
 
 #include <asm/pgalloc.h>
 
-#include <asm/pgtable_repl.h>
-
 /*
  * By default, transparent hugepage support is disabled in order to avoid
  * risking an increased memory footprint for applications that are not
@@ -1782,7 +1780,7 @@ bool touch_pmd(struct vm_area_struct *vma, unsigned long addr,
 {
 	pmd_t entry;
 
-	entry = pmd_mkyoung(pgtable_repl_get_pmd(pmd));
+	entry = pmd_mkyoung(*pmd);
 	if (write)
 		entry = pmd_mkdirty(entry);
 	if (pmdp_set_access_flags(vma, addr & HPAGE_PMD_MASK,
@@ -1893,7 +1891,7 @@ int copy_huge_pmd(struct mm_struct *dst_mm, struct mm_struct *src_mm,
 	spin_lock_nested(src_ptl, SINGLE_DEPTH_NESTING);
 
 	ret = -EAGAIN;
-	pmd = pgtable_repl_get_pmd(src_pmd);
+	pmd = *src_pmd;
 
 	if (unlikely(thp_migration_supported() &&
 		     pmd_is_valid_softleaf(pmd))) {
@@ -2198,9 +2196,9 @@ vm_fault_t do_huge_pmd_numa_page(struct vm_fault *vmf)
 	int flags = 0;
 
 	vmf->ptl = pmd_lock(vma->vm_mm, vmf->pmd);
-	old_pmd = pgtable_repl_get_pmd(vmf->pmd);
+	old_pmd = pmdp_get(vmf->pmd);
 
-	if (unlikely(!pmd_same(*vmf->pmd, vmf->orig_pmd))) {
+	if (unlikely(!pmd_same(old_pmd, vmf->orig_pmd))) {
 		spin_unlock(vmf->ptl);
 		return 0;
 	}
@@ -2243,13 +2241,13 @@ vm_fault_t do_huge_pmd_numa_page(struct vm_fault *vmf)
 
 	flags |= TNF_MIGRATE_FAIL;
 	vmf->ptl = pmd_lock(vma->vm_mm, vmf->pmd);
-	if (unlikely(!pmd_same(*vmf->pmd, vmf->orig_pmd))) {
+	if (unlikely(!pmd_same(pmdp_get(vmf->pmd), vmf->orig_pmd))) {
 		spin_unlock(vmf->ptl);
 		return 0;
 	}
 out_map:
 	/* Restore the PMD */
-	pmd = pmd_modify(pgtable_repl_get_pmd(vmf->pmd), vma->vm_page_prot);
+	pmd = pmd_modify(pmdp_get(vmf->pmd), vma->vm_page_prot);
 	pmd = pmd_mkyoung(pmd);
 	if (writable)
 		pmd = pmd_mkwrite(pmd, vma);
@@ -2281,7 +2279,7 @@ bool madvise_free_huge_pmd(struct mmu_gather *tlb, struct vm_area_struct *vma,
 	if (!ptl)
 		goto out_unlocked;
 
-	orig_pmd = pgtable_repl_get_pmd(pmd);
+	orig_pmd = *pmd;
 	if (is_huge_zero_pmd(orig_pmd))
 		goto out;
 
@@ -4933,21 +4931,19 @@ void remove_migration_pmd(struct page_vma_mapped_walk *pvmw, struct page *new)
 	unsigned long address = pvmw->address;
 	unsigned long haddr = address & HPAGE_PMD_MASK;
 	pmd_t pmde;
-	pmd_t pmdval;
 	softleaf_t entry;
 
 	if (!(pvmw->pmd && !pvmw->pte))
 		return;
-	pmdval = pgtable_repl_get_pmd(pvmw->pmd);
-	entry = softleaf_from_pmd(pmdval);
+	entry = softleaf_from_pmd(*pvmw->pmd);
 	folio_get(folio);
 	pmde = folio_mk_pmd(folio, READ_ONCE(vma->vm_page_prot));
 
-	if (pmd_swp_soft_dirty(pmdval))
+	if (pmd_swp_soft_dirty(*pvmw->pmd))
 		pmde = pmd_mksoft_dirty(pmde);
 	if (softleaf_is_migration_write(entry))
 		pmde = pmd_mkwrite(pmde, vma);
-	if (pmd_swp_uffd_wp(pmdval))
+	if (pmd_swp_uffd_wp(*pvmw->pmd))
 		pmde = pmd_mkuffd_wp(pmde);
 	if (!softleaf_is_migration_young(entry))
 		pmde = pmd_mkold(pmde);
@@ -4966,9 +4962,9 @@ void remove_migration_pmd(struct page_vma_mapped_walk *pvmw, struct page *new)
 							page_to_pfn(new));
 		pmde = swp_entry_to_pmd(entry);
 
-		if (pmd_swp_soft_dirty(pmdval))
+		if (pmd_swp_soft_dirty(*pvmw->pmd))
 			pmde = pmd_swp_mksoft_dirty(pmde);
-		if (pmd_swp_uffd_wp(pmdval))
+		if (pmd_swp_uffd_wp(*pvmw->pmd))
 			pmde = pmd_swp_mkuffd_wp(pmde);
 	}
 
