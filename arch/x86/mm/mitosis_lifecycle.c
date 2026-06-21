@@ -22,7 +22,6 @@ int sysctl_mitosis_inherit = 1;
 
 struct cr3_switch_info {
 	struct mm_struct *mm;
-	pgd_t *original_pgd;
 	int initiating_cpu;
 };
 
@@ -408,8 +407,6 @@ int pgtable_repl_enable(struct mm_struct *mm)
 	if (!node_isset(base_node, nodes))
 		node_set(base_node, nodes);
 
-	mm->original_pgd = base_pgd;
-
 	if (base_page->pt_replica)
 		mitosis_free_replica_chain(base_page, MITOSIS_CACHE_PGD, mitosis_pgd_alloc_order());
 
@@ -468,24 +465,22 @@ static void switch_cr3_ipi(void *info)
 {
 	struct cr3_switch_info *switch_info = info;
 	struct mm_struct *mm;
-	pgd_t *original_pgd;
-	unsigned long original_pgd_pa, current_cr3, current_pgd_pa;
+	unsigned long pgd_pa, current_cr3, current_pgd_pa;
 
-	if (!switch_info || !switch_info->mm || !switch_info->original_pgd)
+	if (!switch_info || !switch_info->mm)
 		return;
 
 	mm = switch_info->mm;
-	original_pgd = switch_info->original_pgd;
 
 	if (current->mm != mm && current->active_mm != mm)
 		return;
 
-	original_pgd_pa = __pa(original_pgd);
+	pgd_pa = __pa(mm->pgd);
 	current_cr3 = __read_cr3();
 	current_pgd_pa = current_cr3 & PAGE_MASK;
 
-	if (current_pgd_pa != original_pgd_pa) {
-		unsigned long new_cr3 = original_pgd_pa | (current_cr3 & ~PAGE_MASK);
+	if (current_pgd_pa != pgd_pa) {
+		unsigned long new_cr3 = pgd_pa | (current_cr3 & ~PAGE_MASK);
 
 		native_write_cr3(new_cr3);
 		__flush_tlb_all();
@@ -495,9 +490,9 @@ static void switch_cr3_ipi(void *info)
 void pgtable_repl_disable(struct mm_struct *mm)
 {
 	unsigned long flags;
-	int original_node;
+	int pgd_node;
 	struct cr3_switch_info switch_info;
-	struct page *primary_pgd_page;
+	struct page *pgd_page;
 	int alloc_order;
 	int node;
 	pgd_t *pgd;
@@ -513,26 +508,20 @@ void pgtable_repl_disable(struct mm_struct *mm)
 		return;
 	}
 
-	if (!mm->original_pgd)
-		mm->original_pgd = mm->pgd;
-
-	original_node = page_to_nid(virt_to_page(mm->original_pgd));
+	pgd_node = page_to_nid(virt_to_page(mm->pgd));
 
 	smp_store_release(&mm->repl_pgd_enabled, false);
 
-	WRITE_ONCE(mm->pgd, mm->original_pgd);
-
 	switch_info.mm = mm;
-	switch_info.original_pgd = mm->original_pgd;
 	switch_info.initiating_cpu = smp_processor_id();
 
 	local_irq_save(flags);
 	if (current->mm == mm || current->active_mm == mm) {
 		unsigned long current_cr3_pa = __read_cr3() & PAGE_MASK;
-		unsigned long original_pgd_pa = __pa(mm->original_pgd);
+		unsigned long pgd_pa = __pa(mm->pgd);
 
-		if (current_cr3_pa != original_pgd_pa) {
-			native_write_cr3(original_pgd_pa | (__read_cr3() & ~PAGE_MASK));
+		if (current_cr3_pa != pgd_pa) {
+			native_write_cr3(pgd_pa | (__read_cr3() & ~PAGE_MASK));
 			__flush_tlb_all();
 		}
 	}
@@ -604,10 +593,10 @@ void pgtable_repl_disable(struct mm_struct *mm)
 		}
 	}
 
-	primary_pgd_page = virt_to_page(mm->pgd);
+	pgd_page = virt_to_page(mm->pgd);
 	alloc_order = mitosis_pgd_alloc_order();
 
-	primary_pgd_page->pt_replica = NULL;
+	pgd_page->pt_replica = NULL;
 
 	for (node = 0; node < NUMA_NODE_COUNT; node++) {
 		pgd_t *replica_pgd;
@@ -617,7 +606,7 @@ void pgtable_repl_disable(struct mm_struct *mm)
 		if (!node_isset(node, mm->repl_pgd_nodes))
 			continue;
 
-		if (node == original_node)
+		if (node == pgd_node)
 			continue;
 
 		replica_pgd = mm->pgd_replicas[node];
@@ -647,7 +636,6 @@ void pgtable_repl_disable(struct mm_struct *mm)
 
 	memset(mm->pgd_replicas, 0, sizeof(mm->pgd_replicas));
 	nodes_clear(mm->repl_pgd_nodes);
-	mm->original_pgd = NULL;
 
 	pr_info("MITOSIS: Disabled page table replication for mm %p\n", mm);
 	mutex_unlock(&mm->repl_mutex);

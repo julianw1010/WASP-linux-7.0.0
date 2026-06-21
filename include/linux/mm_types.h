@@ -1165,7 +1165,6 @@ struct mm_struct {
 		nodemask_t repl_pgd_nodes;
 		struct mutex repl_mutex;
 		pgd_t *pgd_replicas[NUMA_NODE_COUNT];
-		pgd_t *original_pgd;
 		int repl_steering[NUMA_NODE_COUNT];
 
 		pgd_t * pgd;

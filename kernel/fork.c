@@ -1122,7 +1122,6 @@ static struct mm_struct *mm_init(struct mm_struct *mm, struct task_struct *p,
 	mutex_init(&mm->repl_mutex);
 
 	memset(mm->pgd_replicas, 0, sizeof(mm->pgd_replicas));
-	mm->original_pgd = NULL;
 	for (int i = 0; i < NUMA_NODE_COUNT; i++) {
 		mm->repl_steering[i] = -1;
 	}
