@@ -50,7 +50,6 @@ void pgtable_repl_set_pmd(pmd_t *pmdp, pmd_t pmdval)
 	unsigned long entry_val;
 	const unsigned long pfn_mask = PTE_PFN_MASK;
 	bool has_child;
-	bool child_has_replicas = false;
 
 	if (!pmdp ||
 	    !virt_addr_valid(pmdp))
@@ -73,15 +72,10 @@ void pgtable_repl_set_pmd(pmd_t *pmdp, pmd_t pmdval)
 
 	if (has_child) {
 		unsigned long child_phys = entry_val & pfn_mask;
-		struct page *child_page;
 
-		if (child_phys && pfn_valid(child_phys >> PAGE_SHIFT)) {
-			child_page = pfn_to_page(child_phys >> PAGE_SHIFT);
-			if (child_page && virt_addr_valid(page_address(child_page))) {
-				child_base_page = child_page;
-				child_has_replicas = (child_base_page->pt_replica != NULL);
-			}
-		}
+		BUG_ON(!child_phys || !pfn_valid(child_phys >> PAGE_SHIFT));
+		child_base_page = pfn_to_page(child_phys >> PAGE_SHIFT);
+		BUG_ON(!child_base_page->pt_replica);
 	}
 
 	offset = ((unsigned long)pmdp) & ~PAGE_MASK;
@@ -93,16 +87,12 @@ void pgtable_repl_set_pmd(pmd_t *pmdp, pmd_t pmdval)
 		unsigned long node_val;
 		int node = page_to_nid(cur_page);
 
-		if (has_child && child_has_replicas && child_base_page) {
+		if (has_child) {
 			struct page *node_local_child = get_replica_for_node(child_base_page, node);
 
-			if (node_local_child) {
-				unsigned long node_child_phys = __pa(page_address(node_local_child));
+			BUG_ON(!node_local_child);
 
-				node_val = node_child_phys | (entry_val & ~pfn_mask);
-			} else {
-				node_val = entry_val;
-			}
+			node_val = __pa(page_address(node_local_child)) | (entry_val & ~pfn_mask);
 		} else {
 			node_val = entry_val;
 		}
@@ -127,7 +117,6 @@ void pgtable_repl_set_pud(pud_t *pudp, pud_t pudval)
 	unsigned long offset;
 	const unsigned long pfn_mask = PTE_PFN_MASK;
 	bool has_child;
-	bool child_has_replicas = false;
 
 	if (!pudp ||
 	    !virt_addr_valid(pudp))
@@ -147,8 +136,9 @@ void pgtable_repl_set_pud(pud_t *pudp, pud_t pudval)
 	if (has_child) {
 		unsigned long child_phys = entry_val & pfn_mask;
 
+		BUG_ON(!child_phys || !pfn_valid(child_phys >> PAGE_SHIFT));
 		child_base_page = pfn_to_page(child_phys >> PAGE_SHIFT);
-		child_has_replicas = (child_base_page->pt_replica != NULL);
+		BUG_ON(!child_base_page->pt_replica);
 	}
 
 	offset = ((unsigned long)pudp) & ~PAGE_MASK;
@@ -161,16 +151,12 @@ void pgtable_repl_set_pud(pud_t *pudp, pud_t pudval)
 		unsigned long node_val;
 		int node = page_to_nid(cur_page);
 
-		if (has_child && child_has_replicas) {
+		if (has_child) {
 			struct page *node_local_child = get_replica_for_node(child_base_page, node);
 
-			if (node_local_child) {
-				unsigned long node_child_phys = __pa(page_address(node_local_child));
+			BUG_ON(!node_local_child);
 
-				node_val = node_child_phys | (entry_val & ~pfn_mask);
-			} else {
-				node_val = entry_val;
-			}
+			node_val = __pa(page_address(node_local_child)) | (entry_val & ~pfn_mask);
 		} else {
 			node_val = entry_val;
 		}
@@ -195,7 +181,6 @@ void pgtable_repl_set_p4d(p4d_t *p4dp, p4d_t p4dval)
 	unsigned long offset;
 	const unsigned long pfn_mask = PTE_PFN_MASK;
 	bool has_child;
-	bool child_has_replicas = false;
 	bool pti_mirror = !pgtable_l5_enabled() && mitosis_pti_active();
 
 	if (!p4dp ||
@@ -227,8 +212,9 @@ void pgtable_repl_set_p4d(p4d_t *p4dp, p4d_t p4dval)
 	if (has_child) {
 		unsigned long child_phys = entry_val & pfn_mask;
 
+		BUG_ON(!child_phys || !pfn_valid(child_phys >> PAGE_SHIFT));
 		child_base_page = pfn_to_page(child_phys >> PAGE_SHIFT);
-		child_has_replicas = (child_base_page->pt_replica != NULL);
+		BUG_ON(!child_base_page->pt_replica);
 	}
 
 	offset = ((unsigned long)p4dp) & ~PAGE_MASK;
@@ -241,16 +227,12 @@ void pgtable_repl_set_p4d(p4d_t *p4dp, p4d_t p4dval)
 		unsigned long node_val;
 		int node = page_to_nid(cur_page);
 
-		if (has_child && child_has_replicas) {
+		if (has_child) {
 			struct page *node_local_child = get_replica_for_node(child_base_page, node);
 
-			if (node_local_child) {
-				unsigned long node_child_phys = __pa(page_address(node_local_child));
+			BUG_ON(!node_local_child);
 
-				node_val = node_child_phys | (entry_val & ~pfn_mask);
-			} else {
-				node_val = entry_val;
-			}
+			node_val = __pa(page_address(node_local_child)) | (entry_val & ~pfn_mask);
 		} else {
 			node_val = entry_val;
 		}
@@ -282,7 +264,6 @@ void pgtable_repl_set_pgd(pgd_t *pgdp, pgd_t pgdval)
 	unsigned long offset;
 	const unsigned long pfn_mask = PTE_PFN_MASK;
 	bool has_child;
-	bool child_has_replicas = false;
 	bool pti_mirror = mitosis_pti_active();
 
 	if (!pgdp ||
@@ -314,8 +295,9 @@ void pgtable_repl_set_pgd(pgd_t *pgdp, pgd_t pgdval)
 	if (has_child) {
 		unsigned long child_phys = entry_val & pfn_mask;
 
+		BUG_ON(!child_phys || !pfn_valid(child_phys >> PAGE_SHIFT));
 		child_base_page = pfn_to_page(child_phys >> PAGE_SHIFT);
-		child_has_replicas = (child_base_page->pt_replica != NULL);
+		BUG_ON(!child_base_page->pt_replica);
 	}
 
 	offset = ((unsigned long)pgdp) & ~PAGE_MASK;
@@ -328,16 +310,12 @@ void pgtable_repl_set_pgd(pgd_t *pgdp, pgd_t pgdval)
 		unsigned long node_val;
 		int node = page_to_nid(cur_page);
 
-		if (has_child && child_has_replicas) {
+		if (has_child) {
 			struct page *node_local_child = get_replica_for_node(child_base_page, node);
 
-			if (node_local_child) {
-				unsigned long node_child_phys = __pa(page_address(node_local_child));
+			BUG_ON(!node_local_child);
 
-				node_val = node_child_phys | (entry_val & ~pfn_mask);
-			} else {
-				node_val = entry_val;
-			}
+			node_val = __pa(page_address(node_local_child)) | (entry_val & ~pfn_mask);
 		} else {
 			node_val = entry_val;
 		}
