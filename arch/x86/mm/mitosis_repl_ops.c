@@ -413,7 +413,11 @@ static unsigned long repl_get_and_clear_entry(void *entryp)
 			(unsigned long *)(page_address(cur_page) + offset);
 		unsigned long old_val = xchg(replica_entry, 0);
 
-		val |= old_val;
+		if (cur_page == start_page)
+			val = old_val;
+		else
+			val |= old_val & PTE_FLAGS_MASK;
+
 		cur_page = cur_page->pt_replica;
 	} while (cur_page && cur_page != start_page);
 	return val;
