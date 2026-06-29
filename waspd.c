@@ -217,6 +217,7 @@ typedef struct {
     double last_dtlb_mr;
     double multiplex_pct;
     int mitosis_enabled;
+    int steering_applied;
     long long prev_majflt, prev_minflt;
     double last_pf_sample_time, last_pf_rate;
     int active;
@@ -977,7 +978,8 @@ static void scan_processes(void) {
 
 static void apply_steering_matrix(process_t *p) {
     if (!p->mitosis_enabled) return;
-    prctl(PR_SET_PGTABLE_REPL_STEERING, steering_matrix, p->tgid, 0, 0);
+    p->steering_applied =
+        (prctl(PR_SET_PGTABLE_REPL_STEERING, steering_matrix, p->tgid, 0, 0) == 0);
 }
 
 static void enable_mitosis(process_t *p) {
@@ -1066,6 +1068,9 @@ static void update_and_decide(void) {
             if (p->mitosis_enabled && (now - p->below_threshold_since) >= HYSTERESIS_MS)
                 disable_mitosis(p);
         }
+
+        if (p->mitosis_enabled && !p->steering_applied)
+            apply_steering_matrix(p);
     }
 }
 
@@ -1215,7 +1220,7 @@ static void draw_processes(int sr, int *er) {
         char hbuf[16] = "";
 
         if (p->mitosis_enabled) {
-            status = "ACTIVE"; color = GREEN;
+            status = p->steering_applied ? "ACTIVE" : "ACTIVE*"; color = GREEN;
             if (p->below_threshold_since > 0) {
                 int rem = HYSTERESIS_MS - (int)(now - p->below_threshold_since);
                 if (rem > 0) snprintf(hbuf, sizeof(hbuf), "-%dms", rem);

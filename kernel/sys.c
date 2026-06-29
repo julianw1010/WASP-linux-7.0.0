@@ -3119,9 +3119,11 @@ SYSCALL_DEFINE5(prctl, int, option, unsigned long, arg2, unsigned long, arg3,
 			break;
 		}
 
-		if (!smp_load_acquire(&mm->repl_pgd_enabled)) {
+		mutex_lock(&mm->repl_mutex);
+
+		if (!mm->repl_pgd_enabled) {
 			error = -EINVAL;
-			goto out_put_mm_steering;
+			goto out_unlock_steering;
 		}
 
 		for (i = 0; i < NUMA_NODE_COUNT; i++) {
@@ -3130,7 +3132,7 @@ SYSCALL_DEFINE5(prctl, int, option, unsigned long, arg2, unsigned long, arg3,
 				if (!node_isset(target, mm->repl_pgd_nodes) ||
 				    mm->pgd_replicas[target] == NULL) {
 					error = -EINVAL;
-					goto out_put_mm_steering;
+					goto out_unlock_steering;
 				}
 			}
 		}
@@ -3155,7 +3157,8 @@ SYSCALL_DEFINE5(prctl, int, option, unsigned long, arg2, unsigned long, arg3,
 		}
 		error = 0;
 
-	out_put_mm_steering:
+	out_unlock_steering:
+		mutex_unlock(&mm->repl_mutex);
 		mitosis_prctl_put_target_mm(mm, task, target_pid);
 		break;
 	}
