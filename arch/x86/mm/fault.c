@@ -1477,11 +1477,9 @@ handle_page_fault(struct pt_regs *regs, unsigned long error_code,
 	} else {
 		do_user_addr_fault(regs, error_code, address);
 
-		if (unlikely(READ_ONCE(mitosis_verify)) && current->mm) {
-			mmap_read_lock(current->mm);
-			mitosis_verify_locality(current->mm);
-			mmap_read_unlock(current->mm);
-		}
+		if (unlikely(READ_ONCE(mitosis_verify)) && current->mm &&
+		    !irqs_disabled())
+			mitosis_verify_fault_addr(current->mm, address);
 	}
 	/*
 	 * page fault handling might have reenabled interrupts,

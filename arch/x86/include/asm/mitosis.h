@@ -163,5 +163,5 @@ void mitosis_pt_account_mm(struct mm_struct *mm, int node, int level, int delta)
 void mitosis_pt_account_page(struct page *page, int level, int delta);
 
 extern int mitosis_verify;
-void mitosis_verify_locality(struct mm_struct *mm);
+void mitosis_verify_fault_addr(struct mm_struct *mm, unsigned long address);
 #endif

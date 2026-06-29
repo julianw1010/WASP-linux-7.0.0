@@ -121,23 +121,20 @@ void mitosis_set_pmd(pmd_t *pmdp, pmd_t pmdval)
 		cur_page = cur_page->pt_replica;
 	} while (cur_page && cur_page != start_page);
 
-	if (unlikely(READ_ONCE(mitosis_verify))) {
-		if (is_huge) {
-			cur_page = start_page;
-			do {
-				pmd_t *replica_entry = (pmd_t *)(page_address(cur_page) + offset);
+	if (unlikely(READ_ONCE(mitosis_verify)) && is_huge) {
+		cur_page = start_page;
+		do {
+			pmd_t *replica_entry = (pmd_t *)(page_address(cur_page) + offset);
 
-				if (pmd_val(READ_ONCE(*replica_entry)) != pmd_val(pmdval)) {
-					pr_emerg("MITOSIS verify: set_pmd huge replica on node %d diverged (%lx != %lx)\n",
-						 page_to_nid(cur_page),
-						 (unsigned long)pmd_val(READ_ONCE(*replica_entry)),
-						 (unsigned long)pmd_val(pmdval));
-					BUG();
-				}
-				cur_page = cur_page->pt_replica;
-			} while (cur_page && cur_page != start_page);
-		}
-		mitosis_verify_locality(parent_page->pt_owner_mm);
+			if (pmd_val(READ_ONCE(*replica_entry)) != pmd_val(pmdval)) {
+				pr_emerg("MITOSIS verify: set_pmd huge replica on node %d diverged (%lx != %lx)\n",
+					 page_to_nid(cur_page),
+					 (unsigned long)pmd_val(READ_ONCE(*replica_entry)),
+					 (unsigned long)pmd_val(pmdval));
+				BUG();
+			}
+			cur_page = cur_page->pt_replica;
+		} while (cur_page && cur_page != start_page);
 	}
 	return;
 
@@ -202,9 +199,6 @@ void mitosis_set_pud(pud_t *pudp, pud_t pudval)
 
 		cur_page = cur_page->pt_replica;
 	} while (cur_page && cur_page != start_page);
-
-	if (unlikely(READ_ONCE(mitosis_verify)))
-		mitosis_verify_locality(parent_page->pt_owner_mm);
 	return;
 
 native_only:
@@ -287,9 +281,6 @@ void mitosis_set_p4d(p4d_t *p4dp, p4d_t p4dval)
 
 		cur_page = cur_page->pt_replica;
 	} while (cur_page && cur_page != start_page);
-
-	if (unlikely(READ_ONCE(mitosis_verify)))
-		mitosis_verify_locality(parent_page->pt_owner_mm);
 	return;
 
 native_only:
@@ -372,9 +363,6 @@ void mitosis_set_pgd(pgd_t *pgdp, pgd_t pgdval)
 
 		cur_page = cur_page->pt_replica;
 	} while (cur_page && cur_page != start_page);
-
-	if (unlikely(READ_ONCE(mitosis_verify)))
-		mitosis_verify_locality(parent_page->pt_owner_mm);
 	return;
 
 native_only:
