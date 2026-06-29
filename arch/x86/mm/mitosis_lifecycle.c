@@ -463,6 +463,8 @@ void mitosis_disable(struct mm_struct *mm)
 
 	smp_store_release(&mm->repl_pgd_enabled, false);
 
+	smp_mb();
+
 	switch_info.mm = mm;
 	switch_info.initiating_cpu = smp_processor_id();
 
@@ -661,7 +663,11 @@ static int mitosis_run_on_target(struct task_struct *target,
 	if (ret)
 		return ret;
 
-	wait_for_completion(&work.done);
+	if (wait_for_completion_killable(&work.done)) {
+		if (task_work_cancel(target, &work.twork))
+			return -EINTR;
+		wait_for_completion(&work.done);
+	}
 	return work.result;
 }
 

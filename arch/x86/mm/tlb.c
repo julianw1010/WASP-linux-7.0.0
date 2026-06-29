@@ -1027,7 +1027,7 @@ void switch_mm_irqs_off(struct mm_struct *unused, struct mm_struct *next,
 
 reload_tlb:
 	if (selected_replica) {
-		if (!next->repl_pgd_enabled) {
+		if (!READ_ONCE(next->repl_pgd_enabled)) {
 			pgd_to_use = next->pgd;
 			using_replica = false;
 			selected_replica = NULL;
