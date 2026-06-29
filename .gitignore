@@ -12,7 +12,7 @@
 #
 boot.sh
 diffall.sh
-wasp700.txt
+mitosis700.txt
 .*
 *.a
 *.asn1.[ch]

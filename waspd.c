@@ -68,6 +68,7 @@ static int active_node_count = 0;
 #define SNB_DTLB_LOAD_WALK_COMPLETED  0x0208
 #define SNB_DTLB_LOAD_WALK_DURATION   0x0408
 #define SNB_DTLB_LOAD_STLB_HIT        0x1008
+#define SNB_DTLB_STORE_MISS_WALK      0x0149
 
 #define SNB_MEM_LOAD_RETIRED_L1_HIT   0x01D1
 #define SNB_MEM_LOAD_RETIRED_L2_HIT   0x02D1
@@ -81,6 +82,7 @@ static int active_node_count = 0;
 #define SKX_DTLB_LOAD_WALK_COMPLETED  0x0E08
 #define SKX_DTLB_LOAD_WALK_PENDING    0x1008
 #define SKX_DTLB_LOAD_STLB_HIT        0x2008
+#define SKX_DTLB_STORE_MISS_WALK      0x0149
 
 #define SKX_MEM_LOAD_RETIRED_L1_HIT   0x01D1
 #define SKX_MEM_LOAD_RETIRED_L2_HIT   0x02D1
@@ -211,9 +213,13 @@ typedef struct {
     perf_counter_t mem_loads;
     perf_counter_t dtlb_walks;
     perf_counter_t dtlb_walk_completed;
+    perf_counter_t mem_stores;
+    perf_counter_t dtlb_store_walks;
     counter_reading_t prev_mem_loads_rd;
     counter_reading_t prev_dtlb_walks_rd;
     counter_reading_t prev_dtlb_walk_completed_rd;
+    counter_reading_t prev_mem_stores_rd;
+    counter_reading_t prev_dtlb_store_walks_rd;
     double last_sample_time;
     double last_mar;
     double last_dtlb_mr;
@@ -793,26 +799,26 @@ static void test_raw_events(void) {
 }
 
 struct uarch_events {
-    uint64_t mem_primary, mem_fallback;
-    uint64_t dtlb_primary, dtlb_fallback;
+    uint64_t mem_primary, mem_fallback, mem_store;
+    uint64_t dtlb_primary, dtlb_fallback, dtlb_store;
     uint64_t dtlb_completed;
 };
 
 static const struct uarch_events skx_events = {
-    SKX_MEM_LOAD_RETIRED_L1_HIT, SKX_MEM_INST_RETIRED_ALL_LOADS,
-    SKX_DTLB_LOAD_MISS_WALK, SKX_DTLB_LOAD_WALK_COMPLETED,
+    SKX_MEM_LOAD_RETIRED_L1_HIT, SKX_MEM_INST_RETIRED_ALL_LOADS, SKX_MEM_INST_RETIRED_ALL_STORES,
+    SKX_DTLB_LOAD_MISS_WALK, SKX_DTLB_LOAD_WALK_COMPLETED, SKX_DTLB_STORE_MISS_WALK,
     SKX_DTLB_LOAD_WALK_COMPLETED,
 };
 
 static const struct uarch_events snb_events = {
-    SNB_MEM_LOAD_RETIRED_L1_HIT, SNB_MEM_UOPS_RETIRED_ALL_LOADS,
-    SNB_DTLB_LOAD_MISS_WALK, SNB_DTLB_LOAD_WALK_COMPLETED,
+    SNB_MEM_LOAD_RETIRED_L1_HIT, SNB_MEM_UOPS_RETIRED_ALL_LOADS, SNB_MEM_UOPS_RETIRED_ALL_STORES,
+    SNB_DTLB_LOAD_MISS_WALK, SNB_DTLB_LOAD_WALK_COMPLETED, SNB_DTLB_STORE_MISS_WALK,
     SNB_DTLB_LOAD_WALK_COMPLETED,
 };
 
 static const struct uarch_events amd_events = {
-    AMD_LS_DISPATCH_LOADS, AMD_LS_DISPATCH_ALL,
-    AMD_L1_DTLB_MISS, AMD_DTLB_LOAD_MISS_WALK,
+    AMD_LS_DISPATCH_LOADS, AMD_LS_DISPATCH_ALL, 0,
+    AMD_L1_DTLB_MISS, AMD_DTLB_LOAD_MISS_WALK, 0,
     0,
 };
 
@@ -831,6 +837,16 @@ static int setup_process_counters_raw(process_t *p, const struct uarch_events *e
     else
         init_counter(&p->dtlb_walk_completed);
 
+    if (ev->mem_store)
+        setup_raw_counter(&p->mem_stores, p->tgid, ev->mem_store);
+    else
+        init_counter(&p->mem_stores);
+
+    if (ev->dtlb_store)
+        setup_raw_counter(&p->dtlb_store_walks, p->tgid, ev->dtlb_store);
+    else
+        init_counter(&p->dtlb_store_walks);
+
     return (p->mem_loads.num_fds > 0);
 }
 
@@ -840,6 +856,8 @@ static int setup_process_counters_generic(process_t *p) {
     setup_cache_counter(&p->dtlb_walks, p->tgid,
         PERF_COUNT_HW_CACHE_DTLB, PERF_COUNT_HW_CACHE_OP_READ, PERF_COUNT_HW_CACHE_RESULT_MISS);
     init_counter(&p->dtlb_walk_completed);
+    init_counter(&p->mem_stores);
+    init_counter(&p->dtlb_store_walks);
     return (p->mem_loads.num_fds > 0);
 }
 
@@ -957,6 +975,7 @@ static void add_process(pid_t pid) {
     memset(p, 0, sizeof(*p));
     p->tgid = tgid;
     init_counter(&p->mem_loads); init_counter(&p->dtlb_walks); init_counter(&p->dtlb_walk_completed);
+    init_counter(&p->mem_stores); init_counter(&p->dtlb_store_walks);
     strncpy(p->name, name, sizeof(p->name)-1);
 
     if (!setup_process_counters(p)) return;
@@ -964,6 +983,8 @@ static void add_process(pid_t pid) {
     p->prev_mem_loads_rd         = read_counter_full(&p->mem_loads);
     p->prev_dtlb_walks_rd       = (p->dtlb_walks.num_fds > 0) ? read_counter_full(&p->dtlb_walks) : (counter_reading_t){0,0,0};
     p->prev_dtlb_walk_completed_rd = (p->dtlb_walk_completed.num_fds > 0) ? read_counter_full(&p->dtlb_walk_completed) : (counter_reading_t){0,0,0};
+    p->prev_mem_stores_rd        = (p->mem_stores.num_fds > 0) ? read_counter_full(&p->mem_stores) : (counter_reading_t){0,0,0};
+    p->prev_dtlb_store_walks_rd  = (p->dtlb_store_walks.num_fds > 0) ? read_counter_full(&p->dtlb_store_walks) : (counter_reading_t){0,0,0};
     p->last_sample_time = get_time_ms();
     p->multiplex_pct = 100.0;
 
@@ -980,6 +1001,8 @@ static void cleanup_dead_processes(void) {
             close_counter(&procs[i].mem_loads);
             close_counter(&procs[i].dtlb_walks);
             close_counter(&procs[i].dtlb_walk_completed);
+            close_counter(&procs[i].mem_stores);
+            close_counter(&procs[i].dtlb_store_walks);
             procs[i].active = 0;
         }
     }
@@ -1042,10 +1065,18 @@ static void update_and_decide(void) {
         counter_reading_t dwc_rd = (p->dtlb_walk_completed.num_fds > 0)
                                      ? read_counter_full(&p->dtlb_walk_completed)
                                      : (counter_reading_t){0,0,0};
+        counter_reading_t ms_rd  = (p->mem_stores.num_fds > 0)
+                                     ? read_counter_full(&p->mem_stores)
+                                     : (counter_reading_t){0,0,0};
+        counter_reading_t dsw_rd = (p->dtlb_store_walks.num_fds > 0)
+                                     ? read_counter_full(&p->dtlb_store_walks)
+                                     : (counter_reading_t){0,0,0};
 
         long long d_mem       = scaled_delta(&ml_rd,  &p->prev_mem_loads_rd);
         long long d_walk      = scaled_delta(&dw_rd,  &p->prev_dtlb_walks_rd);
         long long d_walk_comp = scaled_delta(&dwc_rd, &p->prev_dtlb_walk_completed_rd);
+        long long d_mem_st    = scaled_delta(&ms_rd,  &p->prev_mem_stores_rd);
+        long long d_store_walk = scaled_delta(&dsw_rd, &p->prev_dtlb_store_walks_rd);
 
         double elapsed_ms = now - p->last_sample_time;
         if (elapsed_ms < 1.0) elapsed_ms = 1.0;
@@ -1055,20 +1086,32 @@ static void update_and_decide(void) {
         r = mux_ratio(&ml_rd,  &p->prev_mem_loads_rd);  if (r < worst_mux) worst_mux = r;
         r = mux_ratio(&dw_rd,  &p->prev_dtlb_walks_rd); if (r < worst_mux) worst_mux = r;
         r = mux_ratio(&dwc_rd, &p->prev_dtlb_walk_completed_rd); if (r < worst_mux) worst_mux = r;
+        if (p->mem_stores.num_fds > 0) {
+            r = mux_ratio(&ms_rd, &p->prev_mem_stores_rd); if (r < worst_mux) worst_mux = r;
+        }
+        if (p->dtlb_store_walks.num_fds > 0) {
+            r = mux_ratio(&dsw_rd, &p->prev_dtlb_store_walks_rd); if (r < worst_mux) worst_mux = r;
+        }
         p->multiplex_pct = worst_mux * 100.0;
 
         p->prev_mem_loads_rd         = ml_rd;
         p->prev_dtlb_walks_rd       = dw_rd;
         p->prev_dtlb_walk_completed_rd = dwc_rd;
+        p->prev_mem_stores_rd        = ms_rd;
+        p->prev_dtlb_store_walks_rd  = dsw_rd;
         p->last_sample_time = now;
 
         p->last_mar = (double)d_mem * 1000.0 / elapsed_ms;
 
-        if (d_mem > 0) {
-            long long walks = (d_walk > 0) ? d_walk : d_walk_comp;
-            p->last_dtlb_mr = (double)walks / (double)d_mem;
-        } else {
-            p->last_dtlb_mr = 0.0;
+        {
+            long long load_walks  = (d_walk > 0) ? d_walk : d_walk_comp;
+            long long total_walks = load_walks + d_store_walk;
+            long long mem_access  = d_mem + d_mem_st;
+
+            if (mem_access > 0)
+                p->last_dtlb_mr = (double)total_walks / (double)mem_access;
+            else
+                p->last_dtlb_mr = 0.0;
         }
 
         if (now - p->last_pf_sample_time >= PF_SAMPLE_INTERVAL) {
@@ -1307,6 +1350,8 @@ static void cleanup(void) {
         close_counter(&procs[i].mem_loads);
         close_counter(&procs[i].dtlb_walks);
         close_counter(&procs[i].dtlb_walk_completed);
+        close_counter(&procs[i].mem_stores);
+        close_counter(&procs[i].dtlb_store_walks);
     }
     cleanup_ptl_buffers();
     if (mitosis_available) mitosis_set_inherit(1);
