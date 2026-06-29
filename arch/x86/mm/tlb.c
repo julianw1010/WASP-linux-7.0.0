@@ -25,6 +25,7 @@
 #include <asm/tlb.h>
 
 #include <asm/mitosis.h>
+#include <linux/mitosis_stats.h>
 
 #include "mm_internal.h"
 
@@ -1560,6 +1561,12 @@ void flush_tlb_mm_range(struct mm_struct *mm, unsigned long start,
 	if (mm_global_asid(mm)) {
 		broadcast_tlb_flush(info);
 	} else if (cpumask_any_but(mm_cpumask(mm), cpu) < nr_cpu_ids) {
+		long nr_remote = cpumask_weight(mm_cpumask(mm));
+
+		if (cpumask_test_cpu(cpu, mm_cpumask(mm)))
+			nr_remote--;
+		mitosis_stats_tlb(mm, nr_remote);
+
 		info->trim_cpumask = should_trim_cpumask(mm);
 		flush_tlb_multi(mm_cpumask(mm), info);
 		consider_global_asid(mm);

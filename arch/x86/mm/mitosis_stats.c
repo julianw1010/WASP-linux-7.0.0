@@ -257,6 +257,10 @@ static void mitosis_stats_print(struct seq_file *m, struct mitosis_stats *s,
 	mitosis_print_kv(m, "THP pgtable withdrawals",
 			 atomic_long_read(&s->withdrawals));
 
+	mitosis_print_section(m, "TLB shootdowns (remote-CPU IPIs)");
+	mitosis_print_kv(m, "Total shootdowns",
+			 atomic_long_read(&s->tlb_shootdowns));
+
 	mitosis_print_section(m,
 		"autoNUMA migrations: 4KB base pages  [rows = source node, cols = dest node]");
 	mitosis_print_node_matrix(m, s->numa_migrate_4k);

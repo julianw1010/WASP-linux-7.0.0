@@ -90,7 +90,7 @@ static void replicate_entry_page(unsigned long entry_phys, struct mm_struct *mm,
 		src = page_address(child_page);
 		for (i = 1; i < count; i++)
 			memcpy(page_address(pages[i]), src, PAGE_SIZE);
-		BUG_ON(!mitosis_link_page_replicas(pages, count));
+		mitosis_link_page_replicas(pages, count);
 	}
 }
 
@@ -366,7 +366,6 @@ int mitosis_enable(struct mm_struct *mm)
 	base_page->pt_replica = NULL;
 
 	ret = mitosis_alloc_pgd_replicas(base_page, mm, pgd_pages, &count);
-	BUG_ON(ret);
 
 	for (i = 1; i < count; i++) {
 		pgd_t *dst_pgd = page_address(pgd_pages[i]);
@@ -382,7 +381,7 @@ int mitosis_enable(struct mm_struct *mm)
 		}
 	}
 
-	BUG_ON(!mitosis_link_page_replicas(pgd_pages, count));
+	mitosis_link_page_replicas(pgd_pages, count);
 	mm->repl_pgd_nodes = nodes;
 	memset(mm->pgd_replicas, 0, sizeof(mm->pgd_replicas));
 

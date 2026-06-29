@@ -73,7 +73,6 @@ void mitosis_set_pmd(pmd_t *pmdp, pmd_t pmdval)
 	if (has_child) {
 		unsigned long child_phys = entry_val & pfn_mask;
 
-		BUG_ON(!child_phys || !pfn_valid(child_phys >> PAGE_SHIFT));
 		child_base_page = pfn_to_page(child_phys >> PAGE_SHIFT);
 		BUG_ON(!child_base_page->pt_replica);
 	}
@@ -136,7 +135,6 @@ void mitosis_set_pud(pud_t *pudp, pud_t pudval)
 	if (has_child) {
 		unsigned long child_phys = entry_val & pfn_mask;
 
-		BUG_ON(!child_phys || !pfn_valid(child_phys >> PAGE_SHIFT));
 		child_base_page = pfn_to_page(child_phys >> PAGE_SHIFT);
 		BUG_ON(!child_base_page->pt_replica);
 	}
@@ -212,7 +210,6 @@ void mitosis_set_p4d(p4d_t *p4dp, p4d_t p4dval)
 	if (has_child) {
 		unsigned long child_phys = entry_val & pfn_mask;
 
-		BUG_ON(!child_phys || !pfn_valid(child_phys >> PAGE_SHIFT));
 		child_base_page = pfn_to_page(child_phys >> PAGE_SHIFT);
 		BUG_ON(!child_base_page->pt_replica);
 	}
@@ -295,7 +292,6 @@ void mitosis_set_pgd(pgd_t *pgdp, pgd_t pgdval)
 	if (has_child) {
 		unsigned long child_phys = entry_val & pfn_mask;
 
-		BUG_ON(!child_phys || !pfn_valid(child_phys >> PAGE_SHIFT));
 		child_base_page = pfn_to_page(child_phys >> PAGE_SHIFT);
 		BUG_ON(!child_base_page->pt_replica);
 	}

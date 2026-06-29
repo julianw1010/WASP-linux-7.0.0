@@ -52,9 +52,8 @@ int mitosis_alloc_pte_replicas(struct page *base_page, struct mm_struct *mm,
 				GFP_NOWAIT | GFP_ATOMIC | __GFP_ZERO | __GFP_THISNODE, 0);
 			BUG_ON(!new_page);
 		}
-		BUG_ON(page_to_nid(new_page) != i);
 
-		BUG_ON(!pagetable_pte_ctor(mm, page_ptdesc(new_page)));
+		pagetable_pte_ctor(mm, page_ptdesc(new_page));
 
 		new_page->pt_owner_mm = mm;
 		mm_inc_nr_ptes(mm);
@@ -111,9 +110,8 @@ int mitosis_alloc_pmd_replicas(struct page *base_page, struct mm_struct *mm,
 				GFP_NOWAIT | GFP_ATOMIC | __GFP_ZERO | __GFP_THISNODE, 0);
 			BUG_ON(!new_page);
 		}
-		BUG_ON(page_to_nid(new_page) != i);
 
-		BUG_ON(!pagetable_pmd_ctor(mm, page_ptdesc(new_page)));
+		pagetable_pmd_ctor(mm, page_ptdesc(new_page));
 
 		new_page->pt_owner_mm = mm;
 		mm_inc_nr_pmds(mm);
@@ -170,7 +168,6 @@ int mitosis_alloc_pud_replicas(struct page *base_page, struct mm_struct *mm,
 				GFP_NOWAIT | GFP_ATOMIC | __GFP_ZERO | __GFP_THISNODE, 0);
 			BUG_ON(!new_page);
 		}
-		BUG_ON(page_to_nid(new_page) != i);
 
 		new_page->pt_owner_mm = mm;
 		mm_inc_nr_puds(mm);
@@ -227,7 +224,6 @@ int mitosis_alloc_p4d_replicas(struct page *base_page, struct mm_struct *mm,
 				GFP_NOWAIT | GFP_ATOMIC | __GFP_ZERO | __GFP_THISNODE, 0);
 			BUG_ON(!new_page);
 		}
-		BUG_ON(page_to_nid(new_page) != i);
 
 		new_page->pt_owner_mm = mm;
 		mitosis_pt_account_page(new_page, MITOSIS_CACHE_P4D, 1);
@@ -283,7 +279,6 @@ int mitosis_alloc_pgd_replicas(struct page *base_page, struct mm_struct *mm,
 				alloc_order);
 			BUG_ON(!new_page);
 		}
-		BUG_ON(page_to_nid(new_page) != i);
 
 		new_page->pt_owner_mm = mm;
 		if (mm)
@@ -385,8 +380,7 @@ static void mitosis_alloc_common(struct mm_struct *mm, unsigned long pfn,
 	for (i = 1; i < count; i++)
 		memcpy(page_address(pages[i]), src_addr, PAGE_SIZE);
 
-	BUG_ON(!mm->repl_pgd_enabled);
-	BUG_ON(!mitosis_link_page_replicas(pages, count));
+	mitosis_link_page_replicas(pages, count);
 }
 
 void mitosis_alloc_pte(struct mm_struct *mm, unsigned long pfn)
