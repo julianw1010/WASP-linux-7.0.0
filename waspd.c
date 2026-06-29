@@ -198,9 +198,11 @@ typedef struct {
 
 typedef struct {
     int fds[MAX_THREADS];
+    pid_t tids[MAX_THREADS];
     int num_fds;
     struct perf_event_attr pe;
     int is_raw;
+    int active;
 } perf_counter_t;
 
 typedef struct {
@@ -622,6 +624,7 @@ static void update_ptl_matrix(void) {
     double now = get_time_ms();
     if (now - last_ptl_update < ptl_interval) return;
     if (!ptl_buffers_ready || !ptl_shared_results) return;
+    if (mitosis_count == 0) return;
 
     last_ptl_update = now;
     ptl_measuring = 1;
@@ -684,7 +687,8 @@ static void update_ptl_matrix(void) {
         }
         _exit(0);
     } else if (pid > 0) {
-        waitpid(pid, NULL, 0);
+        while (waitpid(pid, NULL, 0) < 0 && errno == EINTR)
+            ;
         for (int s = 0; s < numa_node_count; s++)
             for (int d = 0; d < numa_node_count; d++)
                 ptl_matrix[s][d] = ptl_shared_results[s][d];
@@ -737,7 +741,9 @@ static int open_counter_fds(perf_counter_t *pc, pid_t tgid) {
         if (fd != -1) {
             ioctl(fd, PERF_EVENT_IOC_RESET, 0);
             ioctl(fd, PERF_EVENT_IOC_ENABLE, 0);
-            pc->fds[pc->num_fds++] = fd;
+            pc->fds[pc->num_fds] = fd;
+            pc->tids[pc->num_fds] = tids[i];
+            pc->num_fds++;
             ok = 1;
         }
     }
@@ -748,6 +754,7 @@ static int setup_raw_counter(perf_counter_t *pc, pid_t tgid, uint64_t cfg) {
     init_counter(pc);
     init_pe_common(&pc->pe);
     pc->pe.type = PERF_TYPE_RAW; pc->pe.config = cfg; pc->is_raw = 1;
+    pc->active = 1;
     return open_counter_fds(pc, tgid);
 }
 
@@ -757,6 +764,7 @@ static int setup_cache_counter(perf_counter_t *pc, pid_t tgid,
     init_pe_common(&pc->pe);
     pc->pe.type = PERF_TYPE_HW_CACHE;
     pc->pe.config = cid | (op << 8) | (res << 16); pc->is_raw = 0;
+    pc->active = 1;
     return open_counter_fds(pc, tgid);
 }
 
@@ -784,42 +792,45 @@ static void test_raw_events(void) {
     else use_raw_events = 0;
 }
 
-static int setup_process_counters_intel_skx(process_t *p) {
-    if (!setup_raw_counter(&p->mem_loads, p->tgid, SKX_MEM_LOAD_RETIRED_L1_HIT))
-        if (!setup_raw_counter(&p->mem_loads, p->tgid, SKX_MEM_INST_RETIRED_ALL_LOADS))
+struct uarch_events {
+    uint64_t mem_primary, mem_fallback;
+    uint64_t dtlb_primary, dtlb_fallback;
+    uint64_t dtlb_completed;
+};
+
+static const struct uarch_events skx_events = {
+    SKX_MEM_LOAD_RETIRED_L1_HIT, SKX_MEM_INST_RETIRED_ALL_LOADS,
+    SKX_DTLB_LOAD_MISS_WALK, SKX_DTLB_LOAD_WALK_COMPLETED,
+    SKX_DTLB_LOAD_WALK_COMPLETED,
+};
+
+static const struct uarch_events snb_events = {
+    SNB_MEM_LOAD_RETIRED_L1_HIT, SNB_MEM_UOPS_RETIRED_ALL_LOADS,
+    SNB_DTLB_LOAD_MISS_WALK, SNB_DTLB_LOAD_WALK_COMPLETED,
+    SNB_DTLB_LOAD_WALK_COMPLETED,
+};
+
+static const struct uarch_events amd_events = {
+    AMD_LS_DISPATCH_LOADS, AMD_LS_DISPATCH_ALL,
+    AMD_L1_DTLB_MISS, AMD_DTLB_LOAD_MISS_WALK,
+    0,
+};
+
+static int setup_process_counters_raw(process_t *p, const struct uarch_events *ev) {
+    if (!setup_raw_counter(&p->mem_loads, p->tgid, ev->mem_primary))
+        if (!ev->mem_fallback || !setup_raw_counter(&p->mem_loads, p->tgid, ev->mem_fallback))
             setup_cache_counter(&p->mem_loads, p->tgid,
                 PERF_COUNT_HW_CACHE_L1D, PERF_COUNT_HW_CACHE_OP_READ, PERF_COUNT_HW_CACHE_RESULT_ACCESS);
 
-    if (!setup_raw_counter(&p->dtlb_walks, p->tgid, SKX_DTLB_LOAD_MISS_WALK))
-        setup_raw_counter(&p->dtlb_walks, p->tgid, SKX_DTLB_LOAD_WALK_COMPLETED);
+    if (!setup_raw_counter(&p->dtlb_walks, p->tgid, ev->dtlb_primary))
+        if (ev->dtlb_fallback)
+            setup_raw_counter(&p->dtlb_walks, p->tgid, ev->dtlb_fallback);
 
-    setup_raw_counter(&p->dtlb_walk_completed, p->tgid, SKX_DTLB_LOAD_WALK_COMPLETED);
-    return (p->mem_loads.num_fds > 0);
-}
+    if (ev->dtlb_completed)
+        setup_raw_counter(&p->dtlb_walk_completed, p->tgid, ev->dtlb_completed);
+    else
+        init_counter(&p->dtlb_walk_completed);
 
-static int setup_process_counters_intel_snb(process_t *p) {
-    if (!setup_raw_counter(&p->mem_loads, p->tgid, SNB_MEM_LOAD_RETIRED_L1_HIT))
-        if (!setup_raw_counter(&p->mem_loads, p->tgid, SNB_MEM_UOPS_RETIRED_ALL_LOADS))
-            setup_cache_counter(&p->mem_loads, p->tgid,
-                PERF_COUNT_HW_CACHE_L1D, PERF_COUNT_HW_CACHE_OP_READ, PERF_COUNT_HW_CACHE_RESULT_ACCESS);
-
-    if (!setup_raw_counter(&p->dtlb_walks, p->tgid, SNB_DTLB_LOAD_MISS_WALK))
-        setup_raw_counter(&p->dtlb_walks, p->tgid, SNB_DTLB_LOAD_WALK_COMPLETED);
-
-    setup_raw_counter(&p->dtlb_walk_completed, p->tgid, SNB_DTLB_LOAD_WALK_COMPLETED);
-    return (p->mem_loads.num_fds > 0);
-}
-
-static int setup_process_counters_amd(process_t *p) {
-    if (!setup_raw_counter(&p->mem_loads, p->tgid, AMD_LS_DISPATCH_LOADS))
-        if (!setup_raw_counter(&p->mem_loads, p->tgid, AMD_LS_DISPATCH_ALL))
-            setup_cache_counter(&p->mem_loads, p->tgid,
-                PERF_COUNT_HW_CACHE_L1D, PERF_COUNT_HW_CACHE_OP_READ, PERF_COUNT_HW_CACHE_RESULT_ACCESS);
-
-    if (!setup_raw_counter(&p->dtlb_walks, p->tgid, AMD_L1_DTLB_MISS))
-        setup_raw_counter(&p->dtlb_walks, p->tgid, AMD_DTLB_LOAD_MISS_WALK);
-
-    init_counter(&p->dtlb_walk_completed);
     return (p->mem_loads.num_fds > 0);
 }
 
@@ -837,44 +848,55 @@ static int setup_process_counters(process_t *p) {
 
     if (use_raw_events) {
         if (cpu_vendor == 2)
-            return setup_process_counters_amd(p);
+            return setup_process_counters_raw(p, &amd_events);
         if (cpu_vendor == 1 && intel_arch >= UARCH_SKX)
-            return setup_process_counters_intel_skx(p);
+            return setup_process_counters_raw(p, &skx_events);
         if (cpu_vendor == 1)
-            return setup_process_counters_intel_snb(p);
+            return setup_process_counters_raw(p, &snb_events);
     }
     return setup_process_counters_generic(p);
+}
+
+static int counter_has_tid(perf_counter_t *pc, pid_t tid) {
+    for (int i = 0; i < pc->num_fds; i++)
+        if (pc->tids[i] == tid) return 1;
+    return 0;
+}
+
+static void reconcile_counter(perf_counter_t *pc, pid_t *tids, int nt) {
+    if (!pc->active) return;
+
+    for (int i = 0; i < pc->num_fds; ) {
+        int alive = 0;
+        for (int j = 0; j < nt; j++)
+            if (tids[j] == pc->tids[i]) { alive = 1; break; }
+        if (alive) { i++; continue; }
+        close(pc->fds[i]);
+        pc->fds[i] = pc->fds[pc->num_fds - 1];
+        pc->tids[i] = pc->tids[pc->num_fds - 1];
+        pc->num_fds--;
+    }
+
+    for (int j = 0; j < nt && pc->num_fds < MAX_THREADS; j++) {
+        if (counter_has_tid(pc, tids[j])) continue;
+        struct perf_event_attr pe = pc->pe;
+        int fd = perf_event_open(&pe, tids[j], -1, -1, 0);
+        if (fd != -1) {
+            ioctl(fd, PERF_EVENT_IOC_RESET, 0);
+            ioctl(fd, PERF_EVENT_IOC_ENABLE, 0);
+            pc->fds[pc->num_fds] = fd;
+            pc->tids[pc->num_fds] = tids[j];
+            pc->num_fds++;
+        }
+    }
 }
 
 static void refresh_process_counters(process_t *p) {
     pid_t tids[MAX_THREADS];
     int nt = get_thread_ids(p->tgid, tids, MAX_THREADS);
-    if (nt <= p->mem_loads.num_fds) return;
-
-    for (int i = p->mem_loads.num_fds; i < nt && p->mem_loads.num_fds < MAX_THREADS; i++) {
-        struct perf_event_attr pe = p->mem_loads.pe;
-        int fd = perf_event_open(&pe, tids[i], -1, -1, 0);
-        if (fd != -1) {
-            ioctl(fd, PERF_EVENT_IOC_RESET, 0); ioctl(fd, PERF_EVENT_IOC_ENABLE, 0);
-            p->mem_loads.fds[p->mem_loads.num_fds++] = fd;
-        }
-        if (p->dtlb_walks.num_fds > 0 && p->dtlb_walks.num_fds < MAX_THREADS) {
-            pe = p->dtlb_walks.pe;
-            fd = perf_event_open(&pe, tids[i], -1, -1, 0);
-            if (fd != -1) {
-                ioctl(fd, PERF_EVENT_IOC_RESET, 0); ioctl(fd, PERF_EVENT_IOC_ENABLE, 0);
-                p->dtlb_walks.fds[p->dtlb_walks.num_fds++] = fd;
-            }
-        }
-        if (p->dtlb_walk_completed.num_fds > 0 && p->dtlb_walk_completed.num_fds < MAX_THREADS) {
-            pe = p->dtlb_walk_completed.pe;
-            fd = perf_event_open(&pe, tids[i], -1, -1, 0);
-            if (fd != -1) {
-                ioctl(fd, PERF_EVENT_IOC_RESET, 0); ioctl(fd, PERF_EVENT_IOC_ENABLE, 0);
-                p->dtlb_walk_completed.fds[p->dtlb_walk_completed.num_fds++] = fd;
-            }
-        }
-    }
+    reconcile_counter(&p->mem_loads, tids, nt);
+    reconcile_counter(&p->dtlb_walks, tids, nt);
+    reconcile_counter(&p->dtlb_walk_completed, tids, nt);
 }
 
 static int is_kernel_thread(pid_t pid) {
@@ -984,7 +1006,6 @@ static void apply_steering_matrix(process_t *p) {
 
 static void enable_mitosis(process_t *p) {
     if (p->mitosis_enabled) return;
-    if (active_node_count < 2) return;
     if (prctl(PR_SET_PGTABLE_REPL, 1, p->tgid, 0, 0) == 0) {
         p->mitosis_enabled = 1; mitosis_count++;
         apply_steering_matrix(p);
@@ -1006,6 +1027,13 @@ static void update_and_decide(void) {
         if (!p->active) continue;
 
         refresh_process_counters(p);
+
+        if (p->mitosis_enabled &&
+            prctl(PR_GET_PGTABLE_REPL, p->tgid, 0, 0, 0) != 1) {
+            p->mitosis_enabled = 0;
+            p->steering_applied = 0;
+            mitosis_count--;
+        }
 
         counter_reading_t ml_rd  = read_counter_full(&p->mem_loads);
         counter_reading_t dw_rd  = (p->dtlb_walks.num_fds > 0)
