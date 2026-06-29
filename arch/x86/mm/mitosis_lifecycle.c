@@ -17,6 +17,7 @@
 #include <linux/task_work.h>
 #include <linux/sched/mm.h>
 #include <linux/mempolicy.h>
+#include <linux/mitosis_stats.h>
 
 int sysctl_mitosis_inherit = 1;
 
@@ -389,6 +390,11 @@ int mitosis_enable(struct mm_struct *mm)
 
 	smp_store_release(&mm->repl_pgd_enabled, true);
 
+	mitosis_stats_attach(mm, base_node);
+	mitosis_stats_seed(mm);
+	for (i = 1; i < count; i++)
+		mitosis_pt_account_page(pgd_pages[i], MITOSIS_CACHE_PGD, 1);
+
 	replicate_existing_pagetables_phase1(mm);
 	replicate_existing_pagetables_phase2(mm);
 
@@ -459,6 +465,8 @@ void mitosis_disable(struct mm_struct *mm)
 		mutex_unlock(&mm->repl_mutex);
 		return;
 	}
+
+	mitosis_stats_to_history(mm);
 
 	pgd_node = page_to_nid(virt_to_page(mm->pgd));
 

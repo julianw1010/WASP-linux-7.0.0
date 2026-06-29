@@ -19,6 +19,7 @@
 #include <asm/tlb.h>
 
 #include <asm/mitosis.h>
+#include <linux/mitosis_stats.h>
 
 /*
  * If a p?d_bad entry is found while walking page tables, report
@@ -170,6 +171,8 @@ void pgtable_trans_huge_deposit(struct mm_struct *mm, pmd_t *pmdp,
 {
 	assert_spin_locked(pmd_lockptr(mm, pmdp));
 
+	mitosis_stats_deposit(mm);
+
 	/* FIFO */
 	if (!pmd_huge_pte(mm, pmdp))
 		INIT_LIST_HEAD(&pgtable->lru);
@@ -187,6 +190,8 @@ pgtable_t pgtable_trans_huge_withdraw(struct mm_struct *mm, pmd_t *pmdp)
 	pgtable_t pgtable;
 
 	assert_spin_locked(pmd_lockptr(mm, pmdp));
+
+	mitosis_stats_withdraw(mm);
 
 	/* FIFO */
 	pgtable = pmd_huge_pte(mm, pmdp);

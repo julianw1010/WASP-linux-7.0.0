@@ -58,6 +58,7 @@ int mitosis_alloc_pte_replicas(struct page *base_page, struct mm_struct *mm,
 
 		new_page->pt_owner_mm = mm;
 		mm_inc_nr_ptes(mm);
+		mitosis_pt_account_page(new_page, MITOSIS_CACHE_PTE, 1);
 
 		new_page->pt_replica = NULL;
 		pages[(*count)++] = new_page;
@@ -116,6 +117,7 @@ int mitosis_alloc_pmd_replicas(struct page *base_page, struct mm_struct *mm,
 
 		new_page->pt_owner_mm = mm;
 		mm_inc_nr_pmds(mm);
+		mitosis_pt_account_page(new_page, MITOSIS_CACHE_PMD, 1);
 
 		new_page->pt_replica = NULL;
 		pages[(*count)++] = new_page;
@@ -172,6 +174,7 @@ int mitosis_alloc_pud_replicas(struct page *base_page, struct mm_struct *mm,
 
 		new_page->pt_owner_mm = mm;
 		mm_inc_nr_puds(mm);
+		mitosis_pt_account_page(new_page, MITOSIS_CACHE_PUD, 1);
 
 		new_page->pt_replica = NULL;
 		pages[(*count)++] = new_page;
@@ -227,6 +230,7 @@ int mitosis_alloc_p4d_replicas(struct page *base_page, struct mm_struct *mm,
 		BUG_ON(page_to_nid(new_page) != i);
 
 		new_page->pt_owner_mm = mm;
+		mitosis_pt_account_page(new_page, MITOSIS_CACHE_P4D, 1);
 
 		new_page->pt_replica = NULL;
 		pages[(*count)++] = new_page;
@@ -316,6 +320,8 @@ int mitosis_free_replica_chain(struct page *primary, int level, int order)
 	for (i = 0; i < free_count; i++) {
 		struct page *p = pages_to_free[i];
 		struct mm_struct *owner_mm = p->pt_owner_mm;
+
+		mitosis_pt_account_mm(owner_mm, page_to_nid(p), level, -1);
 
 		if (level == MITOSIS_CACHE_PTE || level == MITOSIS_CACHE_PMD)
 			pagetable_dtor(page_ptdesc(p));

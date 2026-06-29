@@ -1118,6 +1118,7 @@ static struct mm_struct *mm_init(struct mm_struct *mm, struct task_struct *p,
 	mm->repl_pgd_enabled = false;
 	mm->repl_pending_enable = false;
 	mm->cache_only_mode = false;
+	mm->mitosis_stats = NULL;
 	nodes_clear(mm->repl_pgd_nodes);
 	mutex_init(&mm->repl_mutex);
 

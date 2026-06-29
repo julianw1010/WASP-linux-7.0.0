@@ -1166,6 +1166,7 @@ struct mm_struct {
 		struct mutex repl_mutex;
 		pgd_t *pgd_replicas[NUMA_NODE_COUNT];
 		int repl_steering[NUMA_NODE_COUNT];
+		struct mitosis_stats *mitosis_stats;
 
 		pgd_t * pgd;
 

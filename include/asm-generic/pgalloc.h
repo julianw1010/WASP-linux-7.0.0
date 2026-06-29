@@ -88,6 +88,7 @@ static inline pgtable_t __pte_alloc_one_noprof(struct mm_struct *mm, gfp_t gfp,
 	BUG_ON(!pagetable_pte_ctor(mm, ptdesc));
 
 	page->pt_owner_mm = mm;
+	mitosis_pt_account_page(page, MITOSIS_CACHE_PTE, 1);
 	return ptdesc_page(ptdesc);
 }
 #define __pte_alloc_one(...)	alloc_hooks(__pte_alloc_one_noprof(__VA_ARGS__))
@@ -113,6 +114,8 @@ static inline void mitosis_dtor_free_page(struct page *page, int level)
 	struct ptdesc *ptdesc = page_ptdesc(page);
 	int nid = page_to_nid(page);
 	bool from_cache = PageMitosisFromCache(page);
+
+	mitosis_pt_account_page(page, level, -1);
 
 	pagetable_dtor(ptdesc);
 
@@ -188,6 +191,7 @@ static inline pmd_t *pmd_alloc_one_noprof(struct mm_struct *mm, unsigned long ad
 	BUG_ON(!pagetable_pmd_ctor(mm, ptdesc));
 
 	page->pt_owner_mm = mm;
+	mitosis_pt_account_page(page, MITOSIS_CACHE_PMD, 1);
 	return ptdesc_address(ptdesc);
 }
 #define pmd_alloc_one(...)	alloc_hooks(pmd_alloc_one_noprof(__VA_ARGS__))
@@ -232,6 +236,7 @@ static inline pud_t *__pud_alloc_one_noprof(struct mm_struct *mm, unsigned long 
 	ptdesc = page_ptdesc(page);
 	pagetable_pud_ctor(ptdesc);
 	page->pt_owner_mm = mm;
+	mitosis_pt_account_page(page, MITOSIS_CACHE_PUD, 1);
 	return ptdesc_address(ptdesc);
 }
 #define __pud_alloc_one(...)	alloc_hooks(__pud_alloc_one_noprof(__VA_ARGS__))
@@ -298,6 +303,7 @@ static inline p4d_t *__p4d_alloc_one_noprof(struct mm_struct *mm, unsigned long 
 	ptdesc = page_ptdesc(page);
 	pagetable_p4d_ctor(ptdesc);
 	page->pt_owner_mm = mm;
+	mitosis_pt_account_page(page, MITOSIS_CACHE_P4D, 1);
 	return ptdesc_address(ptdesc);
 }
 #define __p4d_alloc_one(...)	alloc_hooks(__p4d_alloc_one_noprof(__VA_ARGS__))

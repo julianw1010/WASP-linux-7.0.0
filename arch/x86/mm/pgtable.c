@@ -28,6 +28,8 @@ static void mitosis_free_tlb_page(struct mmu_gather *tlb, struct page *page,
 	int nid = page_to_nid(page);
 	bool from_cache = PageMitosisFromCache(page);
 
+	mitosis_pt_account_page(page, level, -1);
+
 	if (from_cache)
 		pagetable_dtor(ptdesc);
 

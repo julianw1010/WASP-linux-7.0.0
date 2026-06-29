@@ -4,6 +4,7 @@
 #include <linux/mm.h>
 #include <linux/gfp.h>
 #include <asm/mitosis.h>
+#include <linux/mitosis_stats.h>
 
 static struct proc_dir_entry *mitosis_dir;
 
@@ -147,6 +148,20 @@ static const struct proc_ops mitosis_inherit_ops = {
 	.proc_release	= single_release,
 };
 
+static const struct proc_ops mitosis_status_ops = {
+	.proc_open	= mitosis_status_open,
+	.proc_read	= seq_read,
+	.proc_lseek	= seq_lseek,
+	.proc_release	= seq_release,
+};
+
+static const struct proc_ops mitosis_history_ops = {
+	.proc_open	= mitosis_history_open,
+	.proc_read	= seq_read,
+	.proc_lseek	= seq_lseek,
+	.proc_release	= seq_release,
+};
+
 static int __init mitosis_proc_init(void)
 {
 	mitosis_dir = proc_mkdir("mitosis", NULL);
@@ -157,6 +172,12 @@ static int __init mitosis_proc_init(void)
 		goto fail;
 
 	if (!proc_create("inherit", 0644, mitosis_dir, &mitosis_inherit_ops))
+		goto fail;
+
+	if (!proc_create("status", 0444, mitosis_dir, &mitosis_status_ops))
+		goto fail;
+
+	if (!proc_create("history", 0444, mitosis_dir, &mitosis_history_ops))
 		goto fail;
 	return 0;
 

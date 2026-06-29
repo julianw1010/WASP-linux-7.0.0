@@ -91,6 +91,7 @@
 #include "swap.h"
 
 #include <asm/mitosis.h>
+#include <linux/mitosis_stats.h>
 
 #if defined(LAST_CPUPID_NOT_IN_PAGE_FLAGS) && !defined(CONFIG_COMPILE_TEST)
 #warning Unfortunate NUMA and NUMA Balancing config, growing page-frame for last_cpupid.
@@ -6105,6 +6106,7 @@ static vm_fault_t do_numa_page(struct vm_fault *vmf)
 
 	/* Migrate to the requested node */
 	if (!migrate_misplaced_folio(folio, target_nid)) {
+		mitosis_stats_numa(vma->vm_mm, false, nid, target_nid);
 		nid = target_nid;
 		flags |= TNF_MIGRATED;
 		task_numa_fault(last_cpupid, nid, nr_pages, flags);

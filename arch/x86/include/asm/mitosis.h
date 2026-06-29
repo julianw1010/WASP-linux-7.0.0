@@ -158,4 +158,7 @@ int mitosis_alloc_p4d_replicas(struct page *base_page, struct mm_struct *mm,
 int mitosis_alloc_pgd_replicas(struct page *base_page, struct mm_struct *mm,
 		       struct page **pages, int *count);
 int mitosis_free_replica_chain(struct page *primary, int level, int order);
+
+void mitosis_pt_account_mm(struct mm_struct *mm, int node, int level, int delta);
+void mitosis_pt_account_page(struct page *page, int level, int delta);
 #endif
