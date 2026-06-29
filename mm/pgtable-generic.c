@@ -173,6 +173,11 @@ void pgtable_trans_huge_deposit(struct mm_struct *mm, pmd_t *pmdp,
 
 	mitosis_stats_deposit(mm);
 
+	if (unlikely(READ_ONCE(mitosis_verify)) &&
+	    smp_load_acquire(&mm->repl_pgd_enabled))
+		BUG_ON(page_to_nid(pgtable) !=
+		       page_to_nid(virt_to_page(mm->pgd)));
+
 	/* FIFO */
 	if (!pmd_huge_pte(mm, pmdp))
 		INIT_LIST_HEAD(&pgtable->lru);

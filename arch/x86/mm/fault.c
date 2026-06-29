@@ -41,6 +41,8 @@
 
 #include <linux/percpu.h>
 
+#include <asm/mitosis.h>
+
 /*
  * Returns 0 if mmiotrace is disabled, or if the fault is not
  * handled by mmiotrace:
@@ -1474,6 +1476,12 @@ handle_page_fault(struct pt_regs *regs, unsigned long error_code,
 		do_kern_addr_fault(regs, error_code, address);
 	} else {
 		do_user_addr_fault(regs, error_code, address);
+
+		if (unlikely(READ_ONCE(mitosis_verify)) && current->mm) {
+			mmap_read_lock(current->mm);
+			mitosis_verify_locality(current->mm);
+			mmap_read_unlock(current->mm);
+		}
 	}
 	/*
 	 * page fault handling might have reenabled interrupts,
