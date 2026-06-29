@@ -566,6 +566,8 @@ void mitosis_disable(struct mm_struct *mm)
 		if (!replica_pgd)
 			continue;
 
+		mitosis_replica_free_inc(MITOSIS_CACHE_PGD);
+
 		replica_page = virt_to_page(replica_pgd);
 		from_cache = PageMitosisFromCache(replica_page);
 		replica_page->pt_replica = NULL;

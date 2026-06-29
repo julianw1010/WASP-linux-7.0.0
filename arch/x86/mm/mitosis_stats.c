@@ -15,6 +15,9 @@ static LIST_HEAD(mitosis_hist_list);
 static DEFINE_SPINLOCK(mitosis_stats_lock);
 static unsigned long mitosis_stats_next_id;
 
+atomic_long_t mitosis_replica_allocs[MITOSIS_PT_NR_LEVELS];
+atomic_long_t mitosis_replica_frees[MITOSIS_PT_NR_LEVELS];
+
 struct mitosis_stats *mitosis_stats_attach(struct mm_struct *mm, int master_node)
 {
 	struct mitosis_stats *s;

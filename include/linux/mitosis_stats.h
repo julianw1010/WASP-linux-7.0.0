@@ -82,4 +82,19 @@ static inline void mitosis_stats_numa(struct mm_struct *mm, bool huge,
 		atomic_long_inc(&s->numa_migrate_4k[from][to]);
 }
 
+extern atomic_long_t mitosis_replica_allocs[MITOSIS_PT_NR_LEVELS];
+extern atomic_long_t mitosis_replica_frees[MITOSIS_PT_NR_LEVELS];
+
+static inline void mitosis_replica_alloc_inc(int level)
+{
+	if (level >= 0 && level < MITOSIS_PT_NR_LEVELS)
+		atomic_long_inc(&mitosis_replica_allocs[level]);
+}
+
+static inline void mitosis_replica_free_inc(int level)
+{
+	if (level >= 0 && level < MITOSIS_PT_NR_LEVELS)
+		atomic_long_inc(&mitosis_replica_frees[level]);
+}
+
 #endif

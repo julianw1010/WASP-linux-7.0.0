@@ -12,6 +12,7 @@
 
 struct ctl_table;
 struct vm_area_struct;
+struct seq_file;
 
 #define MITOSIS_CACHE_PTE   0
 #define MITOSIS_CACHE_PMD   1
@@ -164,4 +165,7 @@ void mitosis_pt_account_page(struct page *page, int level, int delta);
 
 extern int mitosis_verify;
 void mitosis_verify_fault_addr(struct mm_struct *mm, unsigned long address);
+
+int mitosis_audit_run(pid_t pid);
+void mitosis_audit_seq_show(struct seq_file *m);
 #endif

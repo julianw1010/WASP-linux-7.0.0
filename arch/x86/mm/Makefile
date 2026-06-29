@@ -59,4 +59,4 @@ obj-$(CONFIG_X86_MEM_ENCRYPT)	+= mem_encrypt.o
 obj-$(CONFIG_AMD_MEM_ENCRYPT)	+= mem_encrypt_amd.o
 
 obj-$(CONFIG_AMD_MEM_ENCRYPT)	+= mem_encrypt_boot.o
-obj-y += mitosis_lifecycle.o mitosis_cache.o mitosis_steering.o mitosis_ops.o mitosis_alloc.o mitosis_proc.o mitosis_stats.o mitosis_debug.o
+obj-y += mitosis_lifecycle.o mitosis_cache.o mitosis_steering.o mitosis_ops.o mitosis_alloc.o mitosis_proc.o mitosis_stats.o mitosis_debug.o mitosis_audit.o
