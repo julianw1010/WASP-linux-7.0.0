@@ -2984,7 +2984,7 @@ static void __split_huge_zero_page_pmd(struct vm_area_struct *vma,
 	}
 	pte_unmap(pte - 1);
 	smp_wmb(); /* make pte visible before pmd */
-	pgtable_repl_free_pte_replicas(mm, pgtable);
+	mitosis_free_pte_replicas(mm, pgtable);
 	pmd_populate(mm, pmd, pgtable);
 
 }
@@ -3272,7 +3272,7 @@ static void __split_huge_pmd_locked(struct vm_area_struct *vma, pmd_t *pmd,
 	 * time. pmd_populate will recreate them with current content
 	 * via paravirt_alloc_pte, then install per-node PMD pointers.
 	 */
-	pgtable_repl_free_pte_replicas(mm, pgtable);
+	mitosis_free_pte_replicas(mm, pgtable);
 	pmd_populate(mm, pmd, pgtable);
 
 }

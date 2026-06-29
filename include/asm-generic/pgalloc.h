@@ -7,7 +7,7 @@
 #define GFP_PGTABLE_KERNEL	(GFP_KERNEL | __GFP_ZERO)
 #define GFP_PGTABLE_USER	(GFP_PGTABLE_KERNEL | __GFP_ACCOUNT)
 
-#include <asm/pgtable_repl.h>
+#include <asm/mitosis.h>
 
 /**
  * __pte_alloc_one_kernel - allocate memory for a PTE-level kernel page table
@@ -140,7 +140,7 @@ static inline void mitosis_dtor_free_page(struct page *page, int level)
  */
 static inline void pte_free(struct mm_struct *mm, struct page *pte_page)
 {
-	pgtable_repl_free_pte_replicas(mm, pte_page);
+	mitosis_free_pte_replicas(mm, pte_page);
 	mitosis_dtor_free_page(pte_page, MITOSIS_CACHE_PTE);
 }
 

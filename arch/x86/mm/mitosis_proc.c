@@ -3,7 +3,7 @@
 #include <linux/uaccess.h>
 #include <linux/mm.h>
 #include <linux/gfp.h>
-#include <asm/pgtable_repl.h>
+#include <asm/mitosis.h>
 
 static struct proc_dir_entry *mitosis_dir;
 

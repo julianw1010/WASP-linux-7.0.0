@@ -8,7 +8,7 @@
 #include <asm/mtrr.h>
 #include <linux/page-flags.h>
 
-#include <asm/pgtable_repl.h>
+#include <asm/mitosis.h>
 
 #ifdef CONFIG_DYNAMIC_PHYSICAL_MASK
 phys_addr_t physical_mask __ro_after_init = (1ULL << __PHYSICAL_MASK_SHIFT) - 1;
@@ -531,14 +531,14 @@ int pudp_set_access_flags(struct vm_area_struct *vma, unsigned long address,
 int ptep_test_and_clear_young(struct vm_area_struct *vma,
 			      unsigned long addr, pte_t *ptep)
 {
-        return pgtable_repl_ptep_test_and_clear_young(vma, addr, ptep);
+        return mitosis_ptep_test_and_clear_young(vma, addr, ptep);
 }
 
 #if defined(CONFIG_TRANSPARENT_HUGEPAGE) || defined(CONFIG_ARCH_HAS_NONLEAF_PMD_YOUNG)
 int pmdp_test_and_clear_young(struct vm_area_struct *vma,
 			      unsigned long addr, pmd_t *pmdp)
 {
-	return pgtable_repl_pmdp_test_and_clear_young(vma, addr, pmdp);
+	return mitosis_pmdp_test_and_clear_young(vma, addr, pmdp);
 }
 #endif
 

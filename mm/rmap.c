@@ -84,7 +84,7 @@
 #include "internal.h"
 #include "swap.h"
 
-#include <asm/pgtable_repl.h>
+#include <asm/mitosis.h>
 
 static struct kmem_cache *anon_vma_cachep;
 static struct kmem_cache *anon_vma_chain_cachep;

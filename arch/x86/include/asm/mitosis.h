@@ -1,5 +1,5 @@
-#ifndef _ASM_X86_PGTABLE_REPL_H
-#define _ASM_X86_PGTABLE_REPL_H
+#ifndef _ASM_X86_MITOSIS_H
+#define _ASM_X86_MITOSIS_H
 
 #include <linux/types.h>
 #include <linux/nodemask.h>
@@ -28,19 +28,19 @@ struct mitosis_cache_head {
 	atomic64_t returns;
 } ____cacheline_aligned_in_smp;
 
-pmd_t pgtable_repl_pmdp_huge_get_and_clear(struct mm_struct *mm, pmd_t *pmdp);
+pmd_t mitosis_pmdp_huge_get_and_clear(struct mm_struct *mm, pmd_t *pmdp);
 
-void pgtable_repl_pmdp_set_wrprotect(struct mm_struct *mm,
+void mitosis_pmdp_set_wrprotect(struct mm_struct *mm,
 				     unsigned long addr, pmd_t *pmdp);
 
-void pgtable_repl_free_pte_replicas(struct mm_struct *mm, struct page *page);
+void mitosis_free_pte_replicas(struct mm_struct *mm, struct page *page);
 
-pmd_t pgtable_repl_pmdp_establish(struct mm_struct *mm, pmd_t *pmdp, pmd_t pmd);
+pmd_t mitosis_pmdp_establish(struct mm_struct *mm, pmd_t *pmdp, pmd_t pmd);
 
-int pgtable_repl_pmdp_test_and_clear_young(struct vm_area_struct *vma,
+int mitosis_pmdp_test_and_clear_young(struct vm_area_struct *vma,
 					   unsigned long addr, pmd_t *pmdp);
 
-pmd_t pgtable_repl_get_pmd(pmd_t *pmdp);
+pmd_t mitosis_get_pmd(pmd_t *pmdp);
 
 extern struct mitosis_cache_head mitosis_cache[NUMA_NODE_COUNT];
 
@@ -58,40 +58,40 @@ int mitosis_cache_drain_all(void);
 
 extern int sysctl_mitosis_inherit;
 
-int pgtable_repl_enable(struct mm_struct *mm);
-void pgtable_repl_disable(struct mm_struct *mm);
-void pgtable_repl_set_pgd(pgd_t *pgd, pgd_t pgdval);
-void pgtable_repl_set_p4d(p4d_t *p4d, p4d_t p4dval);
-void pgtable_repl_set_pud(pud_t *pud, pud_t pudval);
-void pgtable_repl_set_pmd(pmd_t *pmd, pmd_t pmdval);
-void pgtable_repl_set_pte(pte_t *pte, pte_t pteval);
-pte_t pgtable_repl_get_pte(pte_t *ptep);
+int mitosis_enable(struct mm_struct *mm);
+void mitosis_disable(struct mm_struct *mm);
+void mitosis_set_pgd(pgd_t *pgd, pgd_t pgdval);
+void mitosis_set_p4d(p4d_t *p4d, p4d_t p4dval);
+void mitosis_set_pud(pud_t *pud, pud_t pudval);
+void mitosis_set_pmd(pmd_t *pmd, pmd_t pmdval);
+void mitosis_set_pte(pte_t *pte, pte_t pteval);
+pte_t mitosis_get_pte(pte_t *ptep);
 
-void pgtable_repl_force_steering_switch(struct mm_struct *mm,
+void mitosis_force_steering_switch(struct mm_struct *mm,
 					nodemask_t *changed_nodes);
 
-void pgtable_repl_alloc_pte(struct mm_struct *mm, unsigned long pfn);
-void pgtable_repl_alloc_pmd(struct mm_struct *mm, unsigned long pfn);
-void pgtable_repl_alloc_pud(struct mm_struct *mm, unsigned long pfn);
-void pgtable_repl_alloc_p4d(struct mm_struct *mm, unsigned long pfn);
+void mitosis_alloc_pte(struct mm_struct *mm, unsigned long pfn);
+void mitosis_alloc_pmd(struct mm_struct *mm, unsigned long pfn);
+void mitosis_alloc_pud(struct mm_struct *mm, unsigned long pfn);
+void mitosis_alloc_p4d(struct mm_struct *mm, unsigned long pfn);
 
-void pgtable_repl_release_pte(unsigned long pfn);
-void pgtable_repl_release_pmd(unsigned long pfn);
-void pgtable_repl_release_pud(unsigned long pfn);
-void pgtable_repl_release_p4d(unsigned long pfn);
+void mitosis_release_pte(unsigned long pfn);
+void mitosis_release_pmd(unsigned long pfn);
+void mitosis_release_pud(unsigned long pfn);
+void mitosis_release_p4d(unsigned long pfn);
 
 int mitosis_inherit_sysctl_handler(struct ctl_table *table, int write,
 				   void *buffer, size_t *lenp, loff_t *ppos);
 
-pte_t pgtable_repl_ptep_get_and_clear(struct mm_struct *mm, pte_t *ptep);
+pte_t mitosis_ptep_get_and_clear(struct mm_struct *mm, pte_t *ptep);
 
-int pgtable_repl_enable_external(struct task_struct *target);
+int mitosis_enable_external(struct task_struct *target);
 
-int pgtable_repl_disable_external(struct task_struct *target);
+int mitosis_disable_external(struct task_struct *target);
 
-void pgtable_repl_ptep_set_wrprotect(struct mm_struct *mm,
+void mitosis_ptep_set_wrprotect(struct mm_struct *mm,
 				     unsigned long addr, pte_t *ptep);
-int pgtable_repl_ptep_test_and_clear_young(struct vm_area_struct *vma,
+int mitosis_ptep_test_and_clear_young(struct vm_area_struct *vma,
 					   unsigned long addr, pte_t *ptep);
 
 #ifdef CONFIG_MITIGATION_PAGE_TABLE_ISOLATION
@@ -144,18 +144,18 @@ static inline pgd_t *mitosis_get_user_pgd_entry(pgd_t *kernel_pgdp)
 	return (pgd_t *)((unsigned long)kernel_pgd_base + PAGE_SIZE + offset);
 }
 
-struct page *get_replica_for_node(struct page *base, int target_node);
-bool link_page_replicas(struct page **pages, int count);
+struct page *mitosis_get_replica_for_node(struct page *base, int target_node);
+bool mitosis_link_page_replicas(struct page **pages, int count);
 
-int alloc_pte_replicas(struct page *base_page, struct mm_struct *mm,
+int mitosis_alloc_pte_replicas(struct page *base_page, struct mm_struct *mm,
 		       struct page **pages, int *count);
-int alloc_pmd_replicas(struct page *base_page, struct mm_struct *mm,
+int mitosis_alloc_pmd_replicas(struct page *base_page, struct mm_struct *mm,
 		       struct page **pages, int *count);
-int alloc_pud_replicas(struct page *base_page, struct mm_struct *mm,
+int mitosis_alloc_pud_replicas(struct page *base_page, struct mm_struct *mm,
 		       struct page **pages, int *count);
-int alloc_p4d_replicas(struct page *base_page, struct mm_struct *mm,
+int mitosis_alloc_p4d_replicas(struct page *base_page, struct mm_struct *mm,
 		       struct page **pages, int *count);
-int alloc_pgd_replicas(struct page *base_page, struct mm_struct *mm,
+int mitosis_alloc_pgd_replicas(struct page *base_page, struct mm_struct *mm,
 		       struct page **pages, int *count);
 int mitosis_free_replica_chain(struct page *primary, int level, int order);
 #endif

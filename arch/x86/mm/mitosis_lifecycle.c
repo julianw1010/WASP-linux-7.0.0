@@ -1,7 +1,7 @@
 #include <asm/mmu_context.h>
 #include <asm/pgalloc.h>
 #include <asm/pgtable.h>
-#include <asm/pgtable_repl.h>
+#include <asm/mitosis.h>
 #include <asm/tlbflush.h>
 #include <linux/delay.h>
 #include <linux/gfp.h>
@@ -25,7 +25,7 @@ struct cr3_switch_info {
 	int initiating_cpu;
 };
 
-bool link_page_replicas(struct page **pages, int count)
+bool mitosis_link_page_replicas(struct page **pages, int count)
 {
 	int i;
 
@@ -42,7 +42,7 @@ bool link_page_replicas(struct page **pages, int count)
 	return true;
 }
 
-struct page *get_replica_for_node(struct page *base, int target_node)
+struct page *mitosis_get_replica_for_node(struct page *base, int target_node)
 {
 	struct page *page;
 	struct page *start_page;
@@ -89,7 +89,7 @@ static void replicate_entry_page(unsigned long entry_phys, struct mm_struct *mm,
 		src = page_address(child_page);
 		for (i = 1; i < count; i++)
 			memcpy(page_address(pages[i]), src, PAGE_SIZE);
-		BUG_ON(!link_page_replicas(pages, count));
+		BUG_ON(!mitosis_link_page_replicas(pages, count));
 	}
 }
 
@@ -113,7 +113,7 @@ static void replicate_existing_pagetables_phase1(struct mm_struct *mm)
 
 		if (pgtable_l5_enabled())
 			replicate_entry_page(pgd_val(pgdval) & PTE_PFN_MASK,
-					     mm, alloc_p4d_replicas);
+					     mm, mitosis_alloc_p4d_replicas);
 
 		p4d_base = p4d_offset(&pgd[pgd_idx], 0);
 
@@ -126,7 +126,7 @@ static void replicate_existing_pagetables_phase1(struct mm_struct *mm)
 				continue;
 
 			replicate_entry_page(p4d_val(p4dval) & PTE_PFN_MASK,
-					     mm, alloc_pud_replicas);
+					     mm, mitosis_alloc_pud_replicas);
 
 			pud_base = pud_offset(&p4d_base[p4d_idx], 0);
 
@@ -139,7 +139,7 @@ static void replicate_existing_pagetables_phase1(struct mm_struct *mm)
 					continue;
 
 				replicate_entry_page(pud_val(pudval) & PTE_PFN_MASK,
-						     mm, alloc_pmd_replicas);
+						     mm, mitosis_alloc_pmd_replicas);
 
 				pmd_base = pmd_offset(&pud_base[pud_idx], 0);
 
@@ -151,7 +151,7 @@ static void replicate_existing_pagetables_phase1(struct mm_struct *mm)
 						continue;
 
 					replicate_entry_page(pmd_val(pmdval) & PTE_PFN_MASK,
-							     mm, alloc_pte_replicas);
+							     mm, mitosis_alloc_pte_replicas);
 				}
 			}
 		}
@@ -175,7 +175,7 @@ static struct page *find_local_replica_for_rewrite(unsigned long entry_val,
 	if (!child_page->pt_replica)
 		return NULL;
 
-	local_child = get_replica_for_node(child_page, node);
+	local_child = mitosis_get_replica_for_node(child_page, node);
 	if (!local_child || page_to_nid(local_child) != node)
 		return NULL;
 
@@ -209,7 +209,7 @@ static void replicate_existing_pagetables_phase2(struct mm_struct *mm)
 		if (!node_isset(node, mm->repl_pgd_nodes))
 			continue;
 
-		node_pgd_page = get_replica_for_node(pgd_page, node);
+		node_pgd_page = mitosis_get_replica_for_node(pgd_page, node);
 		if (!node_pgd_page || page_to_nid(node_pgd_page) != node)
 			continue;
 
@@ -326,7 +326,7 @@ static void replicate_existing_pagetables_phase2(struct mm_struct *mm)
 	smp_mb();
 }
 
-int pgtable_repl_enable(struct mm_struct *mm)
+int mitosis_enable(struct mm_struct *mm)
 {
 	struct page *pgd_pages[NUMA_NODE_COUNT];
 	struct page *base_page;
@@ -364,7 +364,7 @@ int pgtable_repl_enable(struct mm_struct *mm)
 
 	base_page->pt_replica = NULL;
 
-	ret = alloc_pgd_replicas(base_page, mm, pgd_pages, &count);
+	ret = mitosis_alloc_pgd_replicas(base_page, mm, pgd_pages, &count);
 	BUG_ON(ret);
 
 	for (i = 1; i < count; i++) {
@@ -381,7 +381,7 @@ int pgtable_repl_enable(struct mm_struct *mm)
 		}
 	}
 
-	BUG_ON(!link_page_replicas(pgd_pages, count));
+	BUG_ON(!mitosis_link_page_replicas(pgd_pages, count));
 	mm->repl_pgd_nodes = nodes;
 	memset(mm->pgd_replicas, 0, sizeof(mm->pgd_replicas));
 
@@ -401,7 +401,7 @@ int pgtable_repl_enable(struct mm_struct *mm)
 
 	mmap_write_unlock(mm);
 
-	pgtable_repl_force_steering_switch(mm, NULL);
+	mitosis_force_steering_switch(mm, NULL);
 
 	mutex_unlock(&mm->repl_mutex);
 
@@ -439,7 +439,7 @@ static void switch_cr3_ipi(void *info)
 	}
 }
 
-void pgtable_repl_disable(struct mm_struct *mm)
+void mitosis_disable(struct mm_struct *mm)
 {
 	unsigned long flags;
 	int pgd_node;
@@ -631,7 +631,7 @@ static void mitosis_enable_task_work_fn(struct callback_head *head)
 	struct mitosis_task_work *work =
 		container_of(head, struct mitosis_task_work, twork);
 
-	work->result = pgtable_repl_enable(current->mm);
+	work->result = mitosis_enable(current->mm);
 	complete(&work->done);
 }
 
@@ -640,7 +640,7 @@ static void mitosis_disable_task_work_fn(struct callback_head *head)
 	struct mitosis_task_work *work =
 		container_of(head, struct mitosis_task_work, twork);
 
-	pgtable_repl_disable(current->mm);
+	mitosis_disable(current->mm);
 	work->result = 0;
 	complete(&work->done);
 }
@@ -666,18 +666,18 @@ static int mitosis_run_on_target(struct task_struct *target,
 	return work.result;
 }
 
-int pgtable_repl_enable_external(struct task_struct *target)
+int mitosis_enable_external(struct task_struct *target)
 {
 	if (target == current)
-		return pgtable_repl_enable(current->mm);
+		return mitosis_enable(current->mm);
 
 	return mitosis_run_on_target(target, mitosis_enable_task_work_fn);
 }
 
-int pgtable_repl_disable_external(struct task_struct *target)
+int mitosis_disable_external(struct task_struct *target)
 {
 	if (target == current) {
-		pgtable_repl_disable(current->mm);
+		mitosis_disable(current->mm);
 		return 0;
 	}
 

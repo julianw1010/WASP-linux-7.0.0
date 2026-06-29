@@ -122,7 +122,7 @@
 #define CREATE_TRACE_POINTS
 #include <trace/events/task.h>
 
-#include <asm/pgtable_repl.h>
+#include <asm/mitosis.h>
 
 #include <kunit/visibility.h>
 
@@ -1213,7 +1213,7 @@ void mmput(struct mm_struct *mm)
 		if (repl) {
 			WARN_ON_ONCE(atomic_read(&mm->mm_users) != 0);
 			synchronize_rcu();
-			pgtable_repl_disable(mm);
+			mitosis_disable(mm);
 			WARN_ON_ONCE(mm->repl_pgd_enabled);
 			WARN_ON_ONCE(!nodes_empty(mm->repl_pgd_nodes));
 		}
@@ -1619,7 +1619,7 @@ static int copy_mm(u64 clone_flags, struct task_struct *tsk)
 			return -ENOMEM;
 
 		if (sysctl_mitosis_inherit == 1 && parent_had_mitosis) {
-			pgtable_repl_enable(mm);
+			mitosis_enable(mm);
 		}
 	}
 

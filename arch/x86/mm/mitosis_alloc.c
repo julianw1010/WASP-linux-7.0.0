@@ -4,11 +4,11 @@
 #include <linux/string.h>
 #include <asm/pgtable.h>
 #include <asm/pgalloc.h>
-#include <asm/pgtable_repl.h>
+#include <asm/mitosis.h>
 #include <asm/io.h>
 #include <asm/cacheflush.h>
 
-int alloc_pte_replicas(struct page *base_page, struct mm_struct *mm,
+int mitosis_alloc_pte_replicas(struct page *base_page, struct mm_struct *mm,
 		       struct page **pages, int *count)
 {
 	int i;
@@ -66,7 +66,7 @@ int alloc_pte_replicas(struct page *base_page, struct mm_struct *mm,
 	return 0;
 }
 
-int alloc_pmd_replicas(struct page *base_page, struct mm_struct *mm,
+int mitosis_alloc_pmd_replicas(struct page *base_page, struct mm_struct *mm,
 		       struct page **pages, int *count)
 {
 	int i;
@@ -124,7 +124,7 @@ int alloc_pmd_replicas(struct page *base_page, struct mm_struct *mm,
 	return 0;
 }
 
-int alloc_pud_replicas(struct page *base_page, struct mm_struct *mm,
+int mitosis_alloc_pud_replicas(struct page *base_page, struct mm_struct *mm,
 		       struct page **pages, int *count)
 {
 	int i;
@@ -180,7 +180,7 @@ int alloc_pud_replicas(struct page *base_page, struct mm_struct *mm,
 	return 0;
 }
 
-int alloc_p4d_replicas(struct page *base_page, struct mm_struct *mm,
+int mitosis_alloc_p4d_replicas(struct page *base_page, struct mm_struct *mm,
 		       struct page **pages, int *count)
 {
 	int i;
@@ -235,7 +235,7 @@ int alloc_p4d_replicas(struct page *base_page, struct mm_struct *mm,
 	return 0;
 }
 
-int alloc_pgd_replicas(struct page *base_page, struct mm_struct *mm,
+int mitosis_alloc_pgd_replicas(struct page *base_page, struct mm_struct *mm,
 		       struct page **pages, int *count)
 {
 	int i;
@@ -354,7 +354,7 @@ int mitosis_free_replica_chain(struct page *primary, int level, int order)
 typedef int (*alloc_replicas_fn_t)(struct page *, struct mm_struct *,
 				   struct page **, int *);
 
-static void pgtable_repl_alloc_common(struct mm_struct *mm, unsigned long pfn,
+static void mitosis_alloc_common(struct mm_struct *mm, unsigned long pfn,
 				      alloc_replicas_fn_t alloc_fn)
 {
 	struct page *base_page;
@@ -380,33 +380,33 @@ static void pgtable_repl_alloc_common(struct mm_struct *mm, unsigned long pfn,
 		memcpy(page_address(pages[i]), src_addr, PAGE_SIZE);
 
 	BUG_ON(!mm->repl_pgd_enabled);
-	BUG_ON(!link_page_replicas(pages, count));
+	BUG_ON(!mitosis_link_page_replicas(pages, count));
 }
 
-void pgtable_repl_alloc_pte(struct mm_struct *mm, unsigned long pfn)
+void mitosis_alloc_pte(struct mm_struct *mm, unsigned long pfn)
 {
-	pgtable_repl_alloc_common(mm, pfn, alloc_pte_replicas);
+	mitosis_alloc_common(mm, pfn, mitosis_alloc_pte_replicas);
 }
 
-void pgtable_repl_alloc_pmd(struct mm_struct *mm, unsigned long pfn)
+void mitosis_alloc_pmd(struct mm_struct *mm, unsigned long pfn)
 {
-	pgtable_repl_alloc_common(mm, pfn, alloc_pmd_replicas);
+	mitosis_alloc_common(mm, pfn, mitosis_alloc_pmd_replicas);
 }
 
-void pgtable_repl_alloc_pud(struct mm_struct *mm, unsigned long pfn)
+void mitosis_alloc_pud(struct mm_struct *mm, unsigned long pfn)
 {
-	pgtable_repl_alloc_common(mm, pfn, alloc_pud_replicas);
+	mitosis_alloc_common(mm, pfn, mitosis_alloc_pud_replicas);
 }
 
-void pgtable_repl_alloc_p4d(struct mm_struct *mm, unsigned long pfn)
+void mitosis_alloc_p4d(struct mm_struct *mm, unsigned long pfn)
 {
 	if (!pgtable_l5_enabled())
 		return;
 
-	pgtable_repl_alloc_common(mm, pfn, alloc_p4d_replicas);
+	mitosis_alloc_common(mm, pfn, mitosis_alloc_p4d_replicas);
 }
 
-void pgtable_repl_release_pte(unsigned long pfn)
+void mitosis_release_pte(unsigned long pfn)
 {
 	if (!pfn_valid(pfn))
 		return;
@@ -414,7 +414,7 @@ void pgtable_repl_release_pte(unsigned long pfn)
 	mitosis_free_replica_chain(pfn_to_page(pfn), MITOSIS_CACHE_PTE, 0);
 }
 
-void pgtable_repl_release_pmd(unsigned long pfn)
+void mitosis_release_pmd(unsigned long pfn)
 {
 	if (!pfn_valid(pfn))
 		return;
@@ -422,7 +422,7 @@ void pgtable_repl_release_pmd(unsigned long pfn)
 	mitosis_free_replica_chain(pfn_to_page(pfn), MITOSIS_CACHE_PMD, 0);
 }
 
-void pgtable_repl_release_pud(unsigned long pfn)
+void mitosis_release_pud(unsigned long pfn)
 {
 	if (!pfn_valid(pfn))
 		return;
@@ -430,7 +430,7 @@ void pgtable_repl_release_pud(unsigned long pfn)
 	mitosis_free_replica_chain(pfn_to_page(pfn), MITOSIS_CACHE_PUD, 0);
 }
 
-void pgtable_repl_release_p4d(unsigned long pfn)
+void mitosis_release_p4d(unsigned long pfn)
 {
 	if (!pgtable_l5_enabled() || !pfn_valid(pfn))
 		return;

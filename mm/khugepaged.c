@@ -24,7 +24,7 @@
 #include <linux/pgalloc.h>
 #include <linux/backing-dev.h>
 
-#include <asm/pgtable_repl.h>
+#include <asm/mitosis.h>
 
 #include <asm/tlb.h>
 #include "internal.h"

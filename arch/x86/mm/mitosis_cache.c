@@ -3,7 +3,7 @@
 #include <linux/spinlock.h>
 #include <linux/highmem.h>
 #include <linux/page-flags.h>
-#include <asm/pgtable_repl.h>
+#include <asm/mitosis.h>
 
 struct mitosis_cache_head mitosis_cache[NUMA_NODE_COUNT] = {
 	[0 ... NUMA_NODE_COUNT - 1] = {

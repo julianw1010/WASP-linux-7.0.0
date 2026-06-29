@@ -2,10 +2,10 @@
 #include <linux/spinlock.h>
 #include <linux/page-flags.h>
 #include <asm/pgtable.h>
-#include <asm/pgtable_repl.h>
+#include <asm/mitosis.h>
 #include <asm/tlbflush.h>
 
-void pgtable_repl_set_pte(pte_t *ptep, pte_t pteval)
+void mitosis_set_pte(pte_t *ptep, pte_t pteval)
 {
 	struct page *pte_page;
 	struct page *cur_page;
@@ -40,7 +40,7 @@ native_only:
 	native_set_pte(ptep, pteval);
 }
 
-void pgtable_repl_set_pmd(pmd_t *pmdp, pmd_t pmdval)
+void mitosis_set_pmd(pmd_t *pmdp, pmd_t pmdval)
 {
 	struct page *parent_page;
 	struct page *child_base_page = NULL;
@@ -88,7 +88,7 @@ void pgtable_repl_set_pmd(pmd_t *pmdp, pmd_t pmdval)
 		int node = page_to_nid(cur_page);
 
 		if (has_child) {
-			struct page *node_local_child = get_replica_for_node(child_base_page, node);
+			struct page *node_local_child = mitosis_get_replica_for_node(child_base_page, node);
 
 			BUG_ON(!node_local_child);
 
@@ -107,7 +107,7 @@ native_only:
 	native_set_pmd(pmdp, pmdval);
 }
 
-void pgtable_repl_set_pud(pud_t *pudp, pud_t pudval)
+void mitosis_set_pud(pud_t *pudp, pud_t pudval)
 {
 	struct page *parent_page;
 	struct page *cur_page;
@@ -152,7 +152,7 @@ void pgtable_repl_set_pud(pud_t *pudp, pud_t pudval)
 		int node = page_to_nid(cur_page);
 
 		if (has_child) {
-			struct page *node_local_child = get_replica_for_node(child_base_page, node);
+			struct page *node_local_child = mitosis_get_replica_for_node(child_base_page, node);
 
 			BUG_ON(!node_local_child);
 
@@ -171,7 +171,7 @@ native_only:
 	native_set_pud(pudp, pudval);
 }
 
-void pgtable_repl_set_p4d(p4d_t *p4dp, p4d_t p4dval)
+void mitosis_set_p4d(p4d_t *p4dp, p4d_t p4dval)
 {
 	struct page *parent_page;
 	struct page *cur_page;
@@ -228,7 +228,7 @@ void pgtable_repl_set_p4d(p4d_t *p4dp, p4d_t p4dval)
 		int node = page_to_nid(cur_page);
 
 		if (has_child) {
-			struct page *node_local_child = get_replica_for_node(child_base_page, node);
+			struct page *node_local_child = mitosis_get_replica_for_node(child_base_page, node);
 
 			BUG_ON(!node_local_child);
 
@@ -254,7 +254,7 @@ native_only:
 	native_set_p4d(p4dp, p4dval);
 }
 
-void pgtable_repl_set_pgd(pgd_t *pgdp, pgd_t pgdval)
+void mitosis_set_pgd(pgd_t *pgdp, pgd_t pgdval)
 {
 	struct page *parent_page;
 	struct page *cur_page;
@@ -311,7 +311,7 @@ void pgtable_repl_set_pgd(pgd_t *pgdp, pgd_t pgdval)
 		int node = page_to_nid(cur_page);
 
 		if (has_child) {
-			struct page *node_local_child = get_replica_for_node(child_base_page, node);
+			struct page *node_local_child = mitosis_get_replica_for_node(child_base_page, node);
 
 			BUG_ON(!node_local_child);
 
@@ -379,7 +379,7 @@ static unsigned long repl_get_entry(void *entryp)
 	return val;
 }
 
-pte_t pgtable_repl_get_pte(pte_t *ptep)
+pte_t mitosis_get_pte(pte_t *ptep)
 {
 	return __pte(repl_get_entry(ptep));
 }
@@ -423,7 +423,7 @@ static unsigned long repl_get_and_clear_entry(void *entryp)
 	return val;
 }
 
-pte_t pgtable_repl_ptep_get_and_clear(struct mm_struct *mm, pte_t *ptep)
+pte_t mitosis_ptep_get_and_clear(struct mm_struct *mm, pte_t *ptep)
 {
 	return __pte(repl_get_and_clear_entry(ptep));
 }
@@ -475,7 +475,7 @@ native_only:
 	} while (!try_cmpxchg((long *)entryp, (long *)&old_val, *(long *)&new_val));
 }
 
-void pgtable_repl_ptep_set_wrprotect(struct mm_struct *mm,
+void mitosis_ptep_set_wrprotect(struct mm_struct *mm,
 				     unsigned long addr, pte_t *ptep)
 {
 	repl_set_wrprotect_entry(ptep);
@@ -528,30 +528,30 @@ native_only:
 	return young;
 }
 
-int pgtable_repl_ptep_test_and_clear_young(struct vm_area_struct *vma,
+int mitosis_ptep_test_and_clear_young(struct vm_area_struct *vma,
 					   unsigned long addr, pte_t *ptep)
 {
 	return repl_test_and_clear_young_entry(ptep);
 }
 
-pmd_t pgtable_repl_pmdp_huge_get_and_clear(struct mm_struct *mm, pmd_t *pmdp)
+pmd_t mitosis_pmdp_huge_get_and_clear(struct mm_struct *mm, pmd_t *pmdp)
 {
 	return __pmd(repl_get_and_clear_entry(pmdp));
 }
 
-void pgtable_repl_pmdp_set_wrprotect(struct mm_struct *mm,
+void mitosis_pmdp_set_wrprotect(struct mm_struct *mm,
 				     unsigned long addr, pmd_t *pmdp)
 {
 	repl_set_wrprotect_entry(pmdp);
 }
 
-void pgtable_repl_free_pte_replicas(struct mm_struct *mm, struct page *page)
+void mitosis_free_pte_replicas(struct mm_struct *mm, struct page *page)
 {
 	mitosis_free_replica_chain(page, MITOSIS_CACHE_PTE, 0);
 
 }
 
-pmd_t pgtable_repl_pmdp_establish(struct mm_struct *mm, pmd_t *pmdp, pmd_t pmd)
+pmd_t mitosis_pmdp_establish(struct mm_struct *mm, pmd_t *pmdp, pmd_t pmd)
 {
 	struct page *pmd_page;
 	struct page *cur_page;
@@ -612,13 +612,13 @@ native_only:
 	}
 }
 
-int pgtable_repl_pmdp_test_and_clear_young(struct vm_area_struct *vma,
+int mitosis_pmdp_test_and_clear_young(struct vm_area_struct *vma,
 					   unsigned long addr, pmd_t *pmdp)
 {
 	return repl_test_and_clear_young_entry(pmdp);
 }
 
-pmd_t pgtable_repl_get_pmd(pmd_t *pmdp)
+pmd_t mitosis_get_pmd(pmd_t *pmdp)
 {
 	return __pmd(repl_get_entry(pmdp));
 }

@@ -18,7 +18,7 @@
 
 #include <asm/tlb.h>
 
-#include <asm/pgtable_repl.h>
+#include <asm/mitosis.h>
 
 /*
  * If a p?d_bad entry is found while walking page tables, report

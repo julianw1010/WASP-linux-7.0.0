@@ -24,7 +24,7 @@
 #include <asm/perf_event.h>
 #include <asm/tlb.h>
 
-#include <asm/pgtable_repl.h>
+#include <asm/mitosis.h>
 
 #include "mm_internal.h"
 

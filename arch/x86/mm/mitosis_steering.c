@@ -3,7 +3,7 @@
 #include <linux/smp.h>
 #include <linux/sched.h>
 #include <asm/tlbflush.h>
-#include <asm/pgtable_repl.h>
+#include <asm/mitosis.h>
 
 struct steering_switch_info {
 	struct mm_struct *mm;
@@ -49,7 +49,7 @@ static void steering_switch_cr3_ipi(void *info)
 	}
 }
 
-void pgtable_repl_force_steering_switch(struct mm_struct *mm,
+void mitosis_force_steering_switch(struct mm_struct *mm,
 					nodemask_t *changed_nodes)
 {
 	struct steering_switch_info switch_info;

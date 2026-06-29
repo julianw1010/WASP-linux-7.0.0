@@ -6,7 +6,7 @@
 #include <linux/mm.h>		/* for struct page */
 #include <linux/pagemap.h>
 
-#include <asm/pgtable_repl.h>
+#include <asm/mitosis.h>
 
 #include <asm/cpufeature.h>
 

@@ -57,7 +57,7 @@
 #define CREATE_TRACE_POINTS
 #include <trace/events/mmap.h>
 
-#include <asm/pgtable_repl.h>
+#include <asm/mitosis.h>
 
 #include "internal.h"
 

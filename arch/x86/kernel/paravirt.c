@@ -34,7 +34,7 @@
 #include <asm/io_bitmap.h>
 #include <asm/gsseg.h>
 #include <asm/msr.h>
-#include <asm/pgtable_repl.h>
+#include <asm/mitosis.h>
 
 /* stub always returning 0. */
 DEFINE_ASM_FUNC(paravirt_ret0, "xor %eax,%eax", .entry.text);
@@ -168,22 +168,22 @@ struct paravirt_patch_template pv_ops = {
 	.mmu.pgd_alloc		= __paravirt_pgd_alloc,
 	.mmu.pgd_free		= paravirt_nop,
 
-	.mmu.alloc_pte		= pgtable_repl_alloc_pte,
-	.mmu.alloc_pmd		= pgtable_repl_alloc_pmd,
-	.mmu.alloc_pud		= pgtable_repl_alloc_pud,
-	.mmu.alloc_p4d		= pgtable_repl_alloc_p4d,
-	.mmu.release_pte	= pgtable_repl_release_pte,
-	.mmu.release_pmd	= pgtable_repl_release_pmd,
-	.mmu.release_pud	= pgtable_repl_release_pud,
-	.mmu.release_p4d	= pgtable_repl_release_p4d,
+	.mmu.alloc_pte		= mitosis_alloc_pte,
+	.mmu.alloc_pmd		= mitosis_alloc_pmd,
+	.mmu.alloc_pud		= mitosis_alloc_pud,
+	.mmu.alloc_p4d		= mitosis_alloc_p4d,
+	.mmu.release_pte	= mitosis_release_pte,
+	.mmu.release_pmd	= mitosis_release_pmd,
+	.mmu.release_pud	= mitosis_release_pud,
+	.mmu.release_p4d	= mitosis_release_p4d,
 
-	.mmu.set_pte		= pgtable_repl_set_pte,
-	.mmu.set_pmd		= pgtable_repl_set_pmd,
+	.mmu.set_pte		= mitosis_set_pte,
+	.mmu.set_pmd		= mitosis_set_pmd,
 
 	.mmu.ptep_modify_prot_start	= __ptep_modify_prot_start,
 	.mmu.ptep_modify_prot_commit	= __ptep_modify_prot_commit,
 
-	.mmu.set_pud		= pgtable_repl_set_pud,
+	.mmu.set_pud		= mitosis_set_pud,
 
 	.mmu.pmd_val		= PTE_IDENT,
 	.mmu.make_pmd		= PTE_IDENT,
@@ -191,12 +191,12 @@ struct paravirt_patch_template pv_ops = {
 	.mmu.pud_val		= PTE_IDENT,
 	.mmu.make_pud		= PTE_IDENT,
 
-	.mmu.set_p4d		= pgtable_repl_set_p4d,
+	.mmu.set_p4d		= mitosis_set_p4d,
 
 	.mmu.p4d_val		= PTE_IDENT,
 	.mmu.make_p4d		= PTE_IDENT,
 
-	.mmu.set_pgd		= pgtable_repl_set_pgd,
+	.mmu.set_pgd		= mitosis_set_pgd,
 
 	.mmu.pte_val		= PTE_IDENT,
 	.mmu.pgd_val		= PTE_IDENT,

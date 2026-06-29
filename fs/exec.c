@@ -78,7 +78,7 @@
 
 #include <trace/events/sched.h>
 
-#include <asm/pgtable_repl.h>
+#include <asm/mitosis.h>
 
 /* For vma exec functions. */
 #include "../mm/internal.h"
@@ -1769,7 +1769,7 @@ static int bprm_execve(struct linux_binprm *bprm)
 	task_numa_free(current, false);
 
 	if (current->mm && current->mm->repl_pending_enable) {
-		pgtable_repl_enable(current->mm);
+		mitosis_enable(current->mm);
 		current->mm->repl_pending_enable = false;
 	}
 

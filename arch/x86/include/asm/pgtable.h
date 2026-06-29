@@ -23,7 +23,7 @@
 #include <asm/coco.h>
 #include <asm-generic/pgtable_uffd.h>
 #include <linux/page_table_check.h>
-#include <asm/pgtable_repl.h>
+#include <asm/mitosis.h>
 
 extern pgd_t early_top_pgt[PTRS_PER_PGD];
 bool __init __early_make_pgtable(unsigned long address, pmdval_t pmd);
@@ -1252,7 +1252,7 @@ extern int ptep_clear_flush_young(struct vm_area_struct *vma,
 static inline pte_t ptep_get_and_clear(struct mm_struct *mm, unsigned long addr,
 				       pte_t *ptep)
 {
-	pte_t pte = pgtable_repl_ptep_get_and_clear(mm, ptep);
+	pte_t pte = mitosis_ptep_get_and_clear(mm, ptep);
 	page_table_check_pte_clear(mm, addr, pte);
 	return pte;
 }
@@ -1263,7 +1263,7 @@ static inline pte_t ptep_get_and_clear_full(struct mm_struct *mm,
                                             int full)
 {
 	pte_t pte;
-	pte = pgtable_repl_ptep_get_and_clear(mm, ptep);
+	pte = mitosis_ptep_get_and_clear(mm, ptep);
 	page_table_check_pte_clear(mm, addr, pte);
 	return pte;
 }
@@ -1277,7 +1277,7 @@ static inline void ptep_set_wrprotect(struct mm_struct *mm,
 	 * (Write=0,Dirty=1).  Use cmpxchg() to prevent races with
 	 * the hardware setting Dirty=1.
 	 */
-	pgtable_repl_ptep_set_wrprotect(mm, addr, ptep);
+	mitosis_ptep_set_wrprotect(mm, addr, ptep);
 }
 
 #define flush_tlb_fix_spurious_fault(vma, address, ptep) do { } while (0)
@@ -1305,7 +1305,7 @@ extern int pmdp_clear_flush_young(struct vm_area_struct *vma,
 static inline pmd_t pmdp_huge_get_and_clear(struct mm_struct *mm, unsigned long addr,
 				       pmd_t *pmdp)
 {
-	pmd_t pmd = pgtable_repl_pmdp_huge_get_and_clear(mm, pmdp);
+	pmd_t pmd = mitosis_pmdp_huge_get_and_clear(mm, pmdp);
 
 	page_table_check_pmd_clear(mm, addr, pmd);
 
@@ -1332,7 +1332,7 @@ static inline void pmdp_set_wrprotect(struct mm_struct *mm,
 	 * (Write=0,Dirty=1).  Use cmpxchg() to prevent races with
 	 * the hardware setting Dirty=1.
 	 */
-	pgtable_repl_pmdp_set_wrprotect(mm, addr, pmdp);
+	mitosis_pmdp_set_wrprotect(mm, addr, pmdp);
 }
 
 #ifndef pmdp_establish
@@ -1341,7 +1341,7 @@ static inline pmd_t pmdp_establish(struct vm_area_struct *vma,
 		unsigned long address, pmd_t *pmdp, pmd_t pmd)
 {
 	page_table_check_pmd_set(vma->vm_mm, address, pmdp, pmd);
-	return pgtable_repl_pmdp_establish(vma->vm_mm, pmdp, pmd);
+	return mitosis_pmdp_establish(vma->vm_mm, pmdp, pmd);
 }
 #endif
 

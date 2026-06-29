@@ -66,7 +66,7 @@
 #include <linux/uidgid.h>
 #include <linux/cred.h>
 
-#include <asm/pgtable_repl.h>
+#include <asm/mitosis.h>
 #include <asm/tlbflush.h>
 
 #include <linux/nospec.h>
@@ -2989,9 +2989,9 @@ SYSCALL_DEFINE5(prctl, int, option, unsigned long, arg2, unsigned long, arg3,
 			}
 
 			if (is_external) {
-				error = pgtable_repl_disable_external(task);
+				error = mitosis_disable_external(task);
 			} else {
-				pgtable_repl_disable(mm);
+				mitosis_disable(mm);
 				error = 0;
 			}
 			goto out_put_mm;
@@ -3008,9 +3008,9 @@ SYSCALL_DEFINE5(prctl, int, option, unsigned long, arg2, unsigned long, arg3,
 		}
 
 		if (is_external) {
-			ret = pgtable_repl_enable_external(task);
+			ret = mitosis_enable_external(task);
 		} else {
-			ret = pgtable_repl_enable(mm);
+			ret = mitosis_enable(mm);
 		}
 
 		if (ret) {
@@ -3151,7 +3151,7 @@ SYSCALL_DEFINE5(prctl, int, option, unsigned long, arg2, unsigned long, arg3,
 					node_set(i, changed_nodes);
 			}
 
-			pgtable_repl_force_steering_switch(mm, &changed_nodes);
+			mitosis_force_steering_switch(mm, &changed_nodes);
 		}
 		error = 0;
 
