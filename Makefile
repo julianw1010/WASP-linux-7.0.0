@@ -2,7 +2,7 @@
 VERSION = 7
 PATCHLEVEL = 0
 SUBLEVEL = 0
-EXTRAVERSION = -wasp
+EXTRAVERSION = -mitosis
 NAME = Baby Opossum Posse
 
 # *DOCUMENTATION*
