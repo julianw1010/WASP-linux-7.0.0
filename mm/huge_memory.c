@@ -2969,6 +2969,7 @@ static void __split_huge_zero_page_pmd(struct vm_area_struct *vma,
 	old_pmd = pmdp_huge_clear_flush(vma, haddr, pmd);
 
 	pgtable = pgtable_trans_huge_withdraw(mm, pmd);
+	mitosis_free_pte_replicas(mm, pgtable);
 	pmd_populate_no_rep(mm, &_pmd, pgtable);
 
 	pte = pte_offset_map(&_pmd, haddr);
@@ -2986,7 +2987,6 @@ static void __split_huge_zero_page_pmd(struct vm_area_struct *vma,
 	}
 	pte_unmap(pte - 1);
 	smp_wmb(); /* make pte visible before pmd */
-	mitosis_free_pte_replicas(mm, pgtable);
 	pmd_populate(mm, pmd, pgtable);
 
 }
@@ -3179,6 +3179,7 @@ static void __split_huge_pmd_locked(struct vm_area_struct *vma, pmd_t *pmd,
 	 * This's critical for some architectures (Power).
 	 */
 	pgtable = pgtable_trans_huge_withdraw(mm, pmd);
+	mitosis_free_pte_replicas(mm, pgtable);
 	pmd_populate_no_rep(mm, &_pmd, pgtable);
 
 	pte = pte_offset_map(&_pmd, haddr);
@@ -3270,12 +3271,6 @@ static void __split_huge_pmd_locked(struct vm_area_struct *vma, pmd_t *pmd,
 		put_page(page);
 
 	smp_wmb(); /* make pte visible before pmd */
-	/*
-	 * Free stale PTE replicas that were created empty at deposit
-	 * time. pmd_populate will recreate them with current content
-	 * via paravirt_alloc_pte, then install per-node PMD pointers.
-	 */
-	mitosis_free_pte_replicas(mm, pgtable);
 	pmd_populate(mm, pmd, pgtable);
 
 }
