@@ -265,22 +265,8 @@ static void map_ldt_struct_to_user(struct mm_struct *mm)
 {
 	pgd_t *pgd = pgd_offset(mm, LDT_BASE_ADDR);
 
-	if (boot_cpu_has(X86_FEATURE_PTI) && !mm->context.ldt) {
+	if (boot_cpu_has(X86_FEATURE_PTI) && !mm->context.ldt)
 		set_pgd(kernel_to_user_pgdp(pgd), *pgd);
-
-		if (smp_load_acquire(&mm->repl_pgd_enabled)) {
-			int node;
-
-			for (node = 0; node < NUMA_NODE_COUNT; node++) {
-				pgd_t *npgd = mm->pgd_replicas[node];
-
-				if (!npgd || npgd == mm->pgd)
-					continue;
-				npgd = pgd_offset_pgd(npgd, LDT_BASE_ADDR);
-				WRITE_ONCE(*kernel_to_user_pgdp(npgd), *npgd);
-			}
-		}
-	}
 }
 
 static void sanity_check_ldt_mapping(struct mm_struct *mm)
@@ -597,6 +583,9 @@ static int write_ldt(void __user *ptr, unsigned long bytecount, int oldmode)
 	struct user_desc ldt_info;
 	struct desc_struct ldt;
 	int error;
+
+	pr_emerg("MITOSIS: modify_ldt write attempted; the LDT is disabled on this kernel\n");
+	BUG();
 
 	error = -EINVAL;
 	if (bytecount != sizeof(ldt_info))
