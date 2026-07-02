@@ -5993,9 +5993,6 @@ vm_fault_t hugetlb_fault(struct mm_struct *mm, struct vm_area_struct *vma,
 		 */
 	};
 
-	pr_emerg("MITOSIS: hugetlb_fault reached; hugetlb is disabled on this kernel\n");
-	BUG();
-
 	/*
 	 * Serialize hugepage allocation and instantiation, so that we don't
 	 * get spurious allocation failures if two CPUs race to instantiate

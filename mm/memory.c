@@ -6622,9 +6622,11 @@ vm_fault_t handle_mm_fault(struct vm_area_struct *vma, unsigned long address,
 
 	lru_gen_enter_fault(vma);
 
-	if (unlikely(is_vm_hugetlb_page(vma)))
+	if (unlikely(is_vm_hugetlb_page(vma))) {
+		pr_emerg("MITOSIS: hugetlb fault attempted; hugetlb is disabled on this kernel\n");
+		BUG();
 		ret = hugetlb_fault(vma->vm_mm, vma, address, flags);
-	else
+	} else
 		ret = __handle_mm_fault(vma, address, flags);
 
 	/*
