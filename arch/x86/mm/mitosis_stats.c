@@ -273,8 +273,8 @@ static void mitosis_stats_print(struct seq_file *m, struct mitosis_stats *s,
 	mitosis_print_node_matrix(m, s->numa_migrate_2m);
 
 	mitosis_print_section(m, history ?
-		"Page-table replicas: MAX watermark  [rows = level, cols = node]" :
-		"Page-table replicas: current  [rows = level, cols = node]");
+		"Page tables (master + replicas): MAX ever existed  [rows = level, cols = node]" :
+		"Page tables (master + replicas): current  [rows = level, cols = node]");
 	mitosis_print_pt_table(m, s, history);
 
 	seq_putc(m, '\n');
