@@ -171,7 +171,7 @@ void pgtable_trans_huge_deposit(struct mm_struct *mm, pmd_t *pmdp,
 {
 	assert_spin_locked(pmd_lockptr(mm, pmdp));
 
-	mitosis_stats_deposit(mm);
+	mitosis_stats_deposit(mm, pgtable);
 
 	if (unlikely(READ_ONCE(mitosis_verify)) &&
 	    smp_load_acquire(&mm->repl_pgd_enabled))
@@ -196,10 +196,9 @@ pgtable_t pgtable_trans_huge_withdraw(struct mm_struct *mm, pmd_t *pmdp)
 
 	assert_spin_locked(pmd_lockptr(mm, pmdp));
 
-	mitosis_stats_withdraw(mm);
-
 	/* FIFO */
 	pgtable = pmd_huge_pte(mm, pmdp);
+	mitosis_stats_withdraw(mm, pgtable);
 	pmd_huge_pte(mm, pmdp) = list_first_entry_or_null(&pgtable->lru,
 							  struct page, lru);
 	if (pmd_huge_pte(mm, pmdp))

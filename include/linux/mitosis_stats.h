@@ -48,16 +48,31 @@ static inline void mitosis_stats_thp_collapse(struct mm_struct *mm)
 		atomic_long_inc(&mm->mitosis_stats->thp_collapse);
 }
 
-static inline void mitosis_stats_deposit(struct mm_struct *mm)
+static inline void mitosis_stats_ring_account(struct page *pgtable, int delta)
+{
+	struct page *cur_page = pgtable;
+	struct page *start_page = pgtable;
+
+	do {
+		mitosis_pt_account_page(cur_page, MITOSIS_CACHE_PTE, delta);
+		cur_page = cur_page->pt_replica;
+	} while (cur_page && cur_page != start_page);
+}
+
+static inline void mitosis_stats_deposit(struct mm_struct *mm, struct page *pgtable)
 {
 	if (mm->mitosis_stats)
 		atomic_long_inc(&mm->mitosis_stats->deposits);
+
+	mitosis_stats_ring_account(pgtable, -1);
 }
 
-static inline void mitosis_stats_withdraw(struct mm_struct *mm)
+static inline void mitosis_stats_withdraw(struct mm_struct *mm, struct page *pgtable)
 {
 	if (mm->mitosis_stats)
 		atomic_long_inc(&mm->mitosis_stats->withdrawals);
+
+	mitosis_stats_ring_account(pgtable, 1);
 }
 
 static inline void mitosis_stats_tlb(struct mm_struct *mm, long count)
