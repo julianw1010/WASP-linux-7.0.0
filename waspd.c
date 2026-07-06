@@ -493,7 +493,7 @@ static void mitosis_read_cache_status(void) {
         char *tok = strtok(line, " \t\n");
         if (!tok || strcmp(tok, "pages") != 0) continue;
         int node = 0;
-        while ((tok = strtok(NULL, " \t\n")) && node < MAX_NUMA_NODES) {
+        while ((tok = strtok(NULL, " \t\n")) && node < numa_node_count && node < MAX_NUMA_NODES) {
             long count = atol(tok);
             if (count < 0) count = 0;
             cache_per_node[node] = count;
