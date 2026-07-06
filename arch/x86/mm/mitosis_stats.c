@@ -18,33 +18,48 @@ static unsigned long mitosis_stats_next_id;
 atomic_long_t mitosis_replica_allocs[MITOSIS_PT_NR_LEVELS];
 atomic_long_t mitosis_replica_frees[MITOSIS_PT_NR_LEVELS];
 
-struct mitosis_stats *mitosis_stats_attach(struct mm_struct *mm, int master_node)
+struct mitosis_stats *mitosis_stats_birth(struct mm_struct *mm)
 {
 	struct mitosis_stats *s;
-
-	if (mm->mitosis_stats)
-		return mm->mitosis_stats;
 
 	s = kzalloc(sizeof(*s), GFP_KERNEL);
 	if (!s)
 		return NULL;
 
 	INIT_LIST_HEAD(&s->list);
-	s->pid = current->pid;
-	get_task_comm(s->comm, current);
 	s->mm = mm;
-	s->master_node = master_node;
-
-	spin_lock(&mitosis_stats_lock);
-	s->id = ++mitosis_stats_next_id;
-	list_add_tail(&s->list, &mitosis_live_list);
-	spin_unlock(&mitosis_stats_lock);
+	s->master_node = NUMA_NO_NODE;
 
 	mm->mitosis_stats = s;
 	return s;
 }
 
-void mitosis_stats_to_history(struct mm_struct *mm)
+struct mitosis_stats *mitosis_stats_attach(struct mm_struct *mm, int master_node)
+{
+	struct mitosis_stats *s = mm->mitosis_stats;
+
+	if (!s)
+		s = mitosis_stats_birth(mm);
+	if (!s)
+		return NULL;
+
+	s->pid = current->pid;
+	get_task_comm(s->comm, current);
+	s->master_node = master_node;
+
+	if (!s->ever_enabled) {
+		s->ever_enabled = 1;
+
+		spin_lock(&mitosis_stats_lock);
+		s->id = ++mitosis_stats_next_id;
+		list_add_tail(&s->list, &mitosis_live_list);
+		spin_unlock(&mitosis_stats_lock);
+	}
+
+	return s;
+}
+
+void mitosis_stats_retire(struct mm_struct *mm)
 {
 	struct mitosis_stats *s = mm->mitosis_stats;
 
@@ -53,9 +68,13 @@ void mitosis_stats_to_history(struct mm_struct *mm)
 
 	mm->mitosis_stats = NULL;
 
-	spin_lock(&mitosis_stats_lock);
-	list_move_tail(&s->list, &mitosis_hist_list);
-	spin_unlock(&mitosis_stats_lock);
+	if (s->ever_enabled) {
+		spin_lock(&mitosis_stats_lock);
+		list_move_tail(&s->list, &mitosis_hist_list);
+		spin_unlock(&mitosis_stats_lock);
+	} else {
+		kfree(s);
+	}
 }
 
 static void mitosis_bump_max(atomic_long_t *maxp, long cur)
@@ -100,77 +119,6 @@ void mitosis_pt_account_page(struct page *page, int level, int delta)
 		return;
 
 	mitosis_pt_account_mm(page->pt_owner_mm, page_to_nid(page), level, delta);
-}
-
-void mitosis_stats_seed(struct mm_struct *mm)
-{
-	unsigned long addr, end = TASK_SIZE;
-	unsigned long next_pgd, next_p4d, next_pud, next_pmd;
-	pgd_t *pgd_base = mm->pgd;
-	pgd_t *pgd;
-	p4d_t *p4d;
-	pud_t *pud;
-	pmd_t *pmd;
-	pte_t *pte;
-
-	if (!mm->mitosis_stats)
-		return;
-
-	mitosis_pt_account_mm(mm, page_to_nid(virt_to_page(pgd_base)),
-			      MITOSIS_CACHE_PGD, 1);
-
-	addr = 0;
-	pgd = pgd_offset_pgd(pgd_base, addr);
-	do {
-		next_pgd = pgd_addr_end(addr, end);
-		if (pgd_none(*pgd) || pgd_bad(*pgd))
-			goto next_pgd_seed;
-
-		p4d = p4d_offset(pgd, addr);
-		if (virt_to_page(p4d) != virt_to_page(pgd_base))
-			mitosis_pt_account_mm(mm, page_to_nid(virt_to_page(p4d)),
-					      MITOSIS_CACHE_P4D, 1);
-		do {
-			next_p4d = p4d_addr_end(addr, next_pgd);
-			if (p4d_none(*p4d) || p4d_bad(*p4d))
-				goto next_p4d_seed;
-
-			pud = pud_offset(p4d, addr);
-			mitosis_pt_account_mm(mm, page_to_nid(virt_to_page(pud)),
-					      MITOSIS_CACHE_PUD, 1);
-			do {
-				next_pud = pud_addr_end(addr, next_p4d);
-				if (pud_none(*pud) || pud_bad(*pud) ||
-				    pud_leaf(*pud))
-					goto next_pud_seed;
-
-				pmd = pmd_offset(pud, addr);
-				mitosis_pt_account_mm(mm,
-						      page_to_nid(virt_to_page(pmd)),
-						      MITOSIS_CACHE_PMD, 1);
-				do {
-					next_pmd = pmd_addr_end(addr, next_pud);
-					if (pmd_none(*pmd) || pmd_bad(*pmd) ||
-					    pmd_trans_huge(*pmd) ||
-					    pmd_leaf(*pmd))
-						goto next_pmd_seed;
-
-					pte = pte_offset_kernel(pmd, addr);
-					mitosis_pt_account_mm(mm,
-							      page_to_nid(virt_to_page(pte)),
-							      MITOSIS_CACHE_PTE, 1);
-next_pmd_seed:
-					addr = next_pmd;
-				} while (pmd++, addr != next_pud);
-next_pud_seed:
-				addr = next_pud;
-			} while (pud++, addr != next_p4d);
-next_p4d_seed:
-			addr = next_p4d;
-		} while (p4d++, addr != next_pgd);
-next_pgd_seed:
-		addr = next_pgd;
-	} while (pgd++, addr != end);
 }
 
 static const char * const mitosis_level_name[MITOSIS_PT_NR_LEVELS] = {

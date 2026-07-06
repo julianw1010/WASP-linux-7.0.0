@@ -123,6 +123,7 @@
 #include <trace/events/task.h>
 
 #include <asm/mitosis.h>
+#include <linux/mitosis_stats.h>
 
 #include <kunit/visibility.h>
 
@@ -727,6 +728,7 @@ void __mmdrop(struct mm_struct *mm)
 
 	WARN_ON_ONCE(mm == current->active_mm);
 	mm_free_pgd(mm);
+	mitosis_stats_retire(mm);
 	mm_free_id(mm);
 	destroy_context(mm);
 	mmu_notifier_subscriptions_destroy(mm);
@@ -1145,6 +1147,10 @@ static struct mm_struct *mm_init(struct mm_struct *mm, struct task_struct *p,
 
 	mm->user_ns = get_user_ns(user_ns);
 	lru_gen_init_mm(mm);
+
+	mitosis_stats_birth(mm);
+	mitosis_pt_account_page(virt_to_page(mm->pgd), MITOSIS_CACHE_PGD, 1);
+
 	return mm;
 
 fail_pcpu:

@@ -15,6 +15,7 @@ struct mitosis_stats {
 	char comm[TASK_COMM_LEN];
 	void *mm;
 	int master_node;
+	int ever_enabled;
 
 	atomic_long_t thp_split;
 	atomic_long_t thp_collapse;
@@ -30,9 +31,9 @@ struct mitosis_stats {
 	atomic_long_t pt_max[NUMA_NODE_COUNT][MITOSIS_PT_NR_LEVELS];
 };
 
+struct mitosis_stats *mitosis_stats_birth(struct mm_struct *mm);
 struct mitosis_stats *mitosis_stats_attach(struct mm_struct *mm, int master_node);
-void mitosis_stats_to_history(struct mm_struct *mm);
-void mitosis_stats_seed(struct mm_struct *mm);
+void mitosis_stats_retire(struct mm_struct *mm);
 int mitosis_status_open(struct inode *inode, struct file *file);
 int mitosis_history_open(struct inode *inode, struct file *file);
 

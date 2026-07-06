@@ -399,7 +399,6 @@ int mitosis_enable(struct mm_struct *mm)
 	smp_store_release(&mm->repl_pgd_enabled, true);
 
 	mitosis_stats_attach(mm, base_node);
-	mitosis_stats_seed(mm);
 	for (i = 1; i < count; i++)
 		mitosis_pt_account_page(pgd_pages[i], MITOSIS_CACHE_PGD, 1);
 
@@ -473,8 +472,6 @@ void mitosis_disable(struct mm_struct *mm)
 		mutex_unlock(&mm->repl_mutex);
 		return;
 	}
-
-	mitosis_stats_to_history(mm);
 
 	pgd_node = page_to_nid(virt_to_page(mm->pgd));
 
@@ -611,6 +608,7 @@ void mitosis_disable(struct mm_struct *mm)
 		from_cache = PageMitosisFromCache(replica_page);
 		replica_page->pt_replica = NULL;
 
+		mitosis_pt_account_page(replica_page, MITOSIS_CACHE_PGD, -1);
 		replica_page->pt_owner_mm = NULL;
 
 		if (alloc_order == 0 && from_cache) {

@@ -386,6 +386,8 @@ static inline void _pgd_free(struct mm_struct *mm, pgd_t *pgd)
 	struct page *page = virt_to_page(pgd);
 	int order = pgd_allocation_order();
 
+	mitosis_pt_account_page(page, MITOSIS_CACHE_PGD, -1);
+
 	if (order == 0) {
 		int nid = page_to_nid(page);
 		bool from_cache = PageMitosisFromCache(page);
