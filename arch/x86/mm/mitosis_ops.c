@@ -4,6 +4,9 @@
 #include <asm/pgtable.h>
 #include <asm/mitosis.h>
 #include <asm/tlbflush.h>
+#include <linux/jump_label.h>
+
+DEFINE_STATIC_KEY_FALSE(mitosis_repl_ever_enabled);
 
 void mitosis_set_pte(pte_t *ptep, pte_t pteval)
 {
@@ -11,6 +14,9 @@ void mitosis_set_pte(pte_t *ptep, pte_t pteval)
 	struct page *cur_page;
 	struct page *start_page;
 	unsigned long offset;
+
+	if (!static_branch_unlikely(&mitosis_repl_ever_enabled))
+		goto native_only;
 
 	if (!ptep ||
 	    !virt_addr_valid(ptep))
@@ -67,6 +73,9 @@ void mitosis_set_pmd(pmd_t *pmdp, pmd_t pmdval)
 	const unsigned long pfn_mask = PTE_PFN_MASK;
 	bool has_child;
 	bool is_huge;
+
+	if (!static_branch_unlikely(&mitosis_repl_ever_enabled))
+		goto native_only;
 
 	if (!pmdp ||
 	    !virt_addr_valid(pmdp))
@@ -153,6 +162,9 @@ void mitosis_set_pud(pud_t *pudp, pud_t pudval)
 	const unsigned long pfn_mask = PTE_PFN_MASK;
 	bool has_child;
 
+	if (!static_branch_unlikely(&mitosis_repl_ever_enabled))
+		goto native_only;
+
 	if (!pudp ||
 	    !virt_addr_valid(pudp))
 		goto native_only;
@@ -216,6 +228,9 @@ void mitosis_set_p4d(p4d_t *p4dp, p4d_t p4dval)
 	const unsigned long pfn_mask = PTE_PFN_MASK;
 	bool has_child;
 	bool pti_mirror = !pgtable_l5_enabled() && mitosis_pti_active();
+
+	if (!static_branch_unlikely(&mitosis_repl_ever_enabled))
+		goto native_only;
 
 	if (!p4dp ||
 	    !virt_addr_valid(p4dp))
@@ -299,6 +314,9 @@ void mitosis_set_pgd(pgd_t *pgdp, pgd_t pgdval)
 	bool has_child;
 	bool pti_mirror = mitosis_pti_active();
 
+	if (!static_branch_unlikely(&mitosis_repl_ever_enabled))
+		goto native_only;
+
 	if (!pgdp ||
 	    !virt_addr_valid(pgdp))
 		goto native_only;
@@ -380,6 +398,9 @@ static unsigned long repl_get_entry(void *entryp)
 	if (!entryp)
 		return 0;
 
+	if (!static_branch_unlikely(&mitosis_repl_ever_enabled))
+		return *(unsigned long *)entryp;
+
 	if (!virt_addr_valid(entryp))
 		return *(unsigned long *)entryp;
 
@@ -427,6 +448,9 @@ static unsigned long repl_get_and_clear_entry(void *entryp)
 	if (!entryp)
 		return 0;
 
+	if (!static_branch_unlikely(&mitosis_repl_ever_enabled))
+		return xchg((unsigned long *)entryp, 0);
+
 	if (!virt_addr_valid(entryp))
 		return xchg((unsigned long *)entryp, 0);
 
@@ -467,6 +491,9 @@ static void repl_set_wrprotect_entry(void *entryp)
 	struct page *start_page;
 	unsigned long offset;
 	unsigned long old_val, new_val;
+
+	if (!static_branch_unlikely(&mitosis_repl_ever_enabled))
+		goto native_only;
 
 	if (!entryp || !virt_addr_valid(entryp))
 		goto native_only;
@@ -520,6 +547,9 @@ static int repl_test_and_clear_young_entry(void *entryp)
 	struct page *start_page;
 	unsigned long offset;
 	int young = 0;
+
+	if (!static_branch_unlikely(&mitosis_repl_ever_enabled))
+		goto native_only;
 
 	if (!entryp || !virt_addr_valid(entryp))
 		goto native_only;
@@ -590,6 +620,9 @@ pmd_t mitosis_pmdp_establish(struct mm_struct *mm, pmd_t *pmdp, pmd_t pmd)
 	struct page *start_page;
 	unsigned long offset;
 	pmdval_t val;
+
+	if (!static_branch_unlikely(&mitosis_repl_ever_enabled))
+		goto native_only;
 
 	if (!pmdp || !virt_addr_valid(pmdp))
 		goto native_only;

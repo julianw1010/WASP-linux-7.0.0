@@ -9,10 +9,13 @@
 #include <linux/spinlock_types.h>
 #include <linux/topology.h>
 #include <linux/bitmap.h>
+#include <linux/jump_label.h>
 
 struct ctl_table;
 struct vm_area_struct;
 struct seq_file;
+
+DECLARE_STATIC_KEY_FALSE(mitosis_repl_ever_enabled);
 
 #define MITOSIS_CACHE_PTE   0
 #define MITOSIS_CACHE_PMD   1

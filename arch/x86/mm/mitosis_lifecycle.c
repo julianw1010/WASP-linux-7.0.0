@@ -396,6 +396,8 @@ int mitosis_enable(struct mm_struct *mm)
 
 	smp_store_release(&mm->repl_pgd_enabled, true);
 
+	static_branch_enable(&mitosis_repl_ever_enabled);
+
 	mitosis_stats_attach(mm, base_node);
 	mitosis_stats_seed(mm);
 	for (i = 1; i < count; i++)
