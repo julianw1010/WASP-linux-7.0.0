@@ -10,21 +10,40 @@ static struct proc_dir_entry *mitosis_dir;
 
 static int mitosis_cache_show(struct seq_file *m, void *v)
 {
+	char buf[12];
 	int node;
 
-	seq_printf(m, "%-6s %8s %12s %12s %12s\n",
-		   "node", "count", "hits", "misses", "returns");
+	seq_puts(m, " Mitosis per-node page-table page cache\n");
+	seq_puts(m, " cols = NUMA node;  pages = currently parked in the cache (current population)\n");
+	seq_puts(m, " hits / misses / returns = cumulative pops served / pops empty / pages pushed back\n");
+	seq_puts(m, " ------------------------------------------------------------------------------------------------\n");
 
+	seq_printf(m, " %-8s", "");
 	for (node = 0; node < NUMA_NODE_COUNT; node++) {
-		struct mitosis_cache_head *c = &mitosis_cache[node];
-
-		seq_printf(m, "%-6d %8d %12lld %12lld %12lld\n",
-			   node,
-			   atomic_read(&c->count),
-			   atomic64_read(&c->hits),
-			   atomic64_read(&c->misses),
-			   atomic64_read(&c->returns));
+		scnprintf(buf, sizeof(buf), "n%d", node);
+		seq_printf(m, " %10s", buf);
 	}
+	seq_putc(m, '\n');
+
+	seq_printf(m, " %-8s", "pages");
+	for (node = 0; node < NUMA_NODE_COUNT; node++)
+		seq_printf(m, " %10d", atomic_read(&mitosis_cache[node].count));
+	seq_putc(m, '\n');
+
+	seq_printf(m, " %-8s", "hits");
+	for (node = 0; node < NUMA_NODE_COUNT; node++)
+		seq_printf(m, " %10lld", atomic64_read(&mitosis_cache[node].hits));
+	seq_putc(m, '\n');
+
+	seq_printf(m, " %-8s", "misses");
+	for (node = 0; node < NUMA_NODE_COUNT; node++)
+		seq_printf(m, " %10lld", atomic64_read(&mitosis_cache[node].misses));
+	seq_putc(m, '\n');
+
+	seq_printf(m, " %-8s", "returns");
+	for (node = 0; node < NUMA_NODE_COUNT; node++)
+		seq_printf(m, " %10lld", atomic64_read(&mitosis_cache[node].returns));
+	seq_putc(m, '\n');
 
 	return 0;
 }
@@ -56,7 +75,7 @@ static ssize_t mitosis_cache_write(struct file *file, const char __user *ubuf,
 		return count;
 	}
 
-	if (val <= 0 || val > 131072)
+	if (val <= 0)
 		return -EINVAL;
 
 	total = 0;
