@@ -478,18 +478,29 @@ static int mitosis_read_int(const char *path) {
     fclose(f);
     return v;
 }
+
 static int mitosis_write_int(const char *path, int val) {
     FILE *f = fopen(path, "w"); if (!f) return -1;
     fprintf(f, "%d\n", val); fclose(f); return 0;
 }
 
+static int mitosis_set_inherit(int i) { return mitosis_write_int(MITOSIS_INHERIT_PATH, i); }
 static void mitosis_read_cache_status(void) {
     cache_total_pages = 0; memset(cache_per_node, 0, sizeof(cache_per_node));
     FILE *f = fopen(MITOSIS_CACHE_PATH, "r"); if (!f) return;
-    char line[256]; int node; int count;
+    char line[1024];
     while (fgets(line, sizeof(line), f)) {
-        if (sscanf(line, "%d %d", &node, &count) >= 2 && node >= 0 && node < MAX_NUMA_NODES)
-            { cache_per_node[node] = count; cache_total_pages += count; }
+        char *tok = strtok(line, " \t\n");
+        if (!tok || strcmp(tok, "pages") != 0) continue;
+        int node = 0;
+        while ((tok = strtok(NULL, " \t\n")) && node < MAX_NUMA_NODES) {
+            long count = atol(tok);
+            if (count < 0) count = 0;
+            cache_per_node[node] = count;
+            cache_total_pages += count;
+            node++;
+        }
+        break;
     }
     fclose(f);
 }
@@ -501,10 +512,6 @@ static void mitosis_update_status(void) {
         mitosis_read_cache_status();
     }
 }
-
-static int mitosis_set_inherit(int i)    { return mitosis_write_int(MITOSIS_INHERIT_PATH, i); }
-static int mitosis_populate_cache(int n) { return mitosis_write_int(MITOSIS_CACHE_PATH, n); }
-static int mitosis_drain_cache(void)     { return mitosis_write_int(MITOSIS_CACHE_PATH, -1); }
 
 static void get_term_size(void) {
     struct winsize ws;
@@ -1322,23 +1329,14 @@ static void draw_processes(int sr, int *er) {
     *er = row;
 }
 
-static void draw_footer(void) {
-    GOTO(term_rows, 1);
-    printf(BG_BLUE " q" RESET " Quit  "
-           BG_BLUE " r" RESET " Remeasure  "
-           BG_BLUE " c" RESET " Cache+100  "
-           BG_BLUE " d" RESET " DrainCache");
-    for (int i = 68; i < term_cols; i++) printf(" ");
-}
-
 static void draw_screen(void) {
     get_term_size(); printf(HOME CLEAR);
     draw_header();
     int mh = active_node_count + 3;
     draw_ptl_matrix(5);
     int er; draw_processes(5 + mh + 1, &er);
-    for (int r = er; r < term_rows - 1; r++) { GOTO(r, 1); printf(ESC "[K"); }
-    draw_footer(); fflush(stdout);
+    for (int r = er; r <= term_rows; r++) { GOTO(r, 1); printf(ESC "[K"); }
+    fflush(stdout);
 }
 
 static void signal_handler(int sig) { (void)sig; stop_requested = 1; }
@@ -1362,7 +1360,6 @@ static void print_usage(const char *prog) {
     printf("  -i N       PTL measurement interval in ms [default: %d]\n", PTL_UPDATE_INTERVAL);
     printf("  -u N       Main loop interval in ms [default: %d]\n", UPDATE_INTERVAL_MS);
     printf("  -y N       Hysteresis duration in ms [default: %d]\n", HYSTERESIS_MS);
-    printf("  -c N       Pre-populate cache with N pages/node\n");
     printf("  -g         Force generic HW_CACHE events (disable raw)\n");
     printf("  -h         Show this help\n");
 }
@@ -1373,14 +1370,13 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    int initial_cache = 0, force_generic = 0;
+    int force_generic = 0;
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "-h") == 0) { print_usage(argv[0]); return 0; }
         else if (strcmp(argv[i], "-i") == 0 && i+1 < argc) ptl_interval = atoi(argv[++i]);
         else if (strcmp(argv[i], "-u") == 0 && i+1 < argc) UPDATE_INTERVAL_MS = atoi(argv[++i]);
         else if (strcmp(argv[i], "-y") == 0 && i+1 < argc) HYSTERESIS_MS = atoi(argv[++i]);
-        else if (strcmp(argv[i], "-c") == 0 && i+1 < argc) initial_cache = atoi(argv[++i]);
         else if (strcmp(argv[i], "-g") == 0) force_generic = 1;
     }
 
@@ -1427,7 +1423,6 @@ int main(int argc, char *argv[]) {
     if (mitosis_available) {
         mitosis_update_status();
         mitosis_set_inherit(0);
-        if (initial_cache > 0) mitosis_populate_cache(initial_cache);
     } else {
         fprintf(stderr, "Warning: %s not found - kernel module may not be loaded\n", MITOSIS_PROC_DIR);
     }
@@ -1436,14 +1431,6 @@ int main(int argc, char *argv[]) {
     last_ptl_update = 0;
 
     while (!stop_requested) {
-        char c;
-        if (read(STDIN_FILENO, &c, 1) == 1) {
-            if (c == 'q' || c == 'Q') break;
-            if (c == 'r' || c == 'R') last_ptl_update = 0;
-            if ((c == 'c' || c == 'C') && mitosis_available) mitosis_populate_cache(100);
-            if ((c == 'd' || c == 'D') && mitosis_available) mitosis_drain_cache();
-        }
-
         cleanup_dead_processes();
         scan_processes();
 
