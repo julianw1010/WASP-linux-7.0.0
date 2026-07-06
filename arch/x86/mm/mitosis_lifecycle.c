@@ -342,6 +342,8 @@ int mitosis_enable(struct mm_struct *mm)
 	if (nodes_weight(nodes) < 2)
 		return -EINVAL;
 
+	static_branch_enable(&mitosis_repl_ever_enabled);
+
 	for (i = 0; i < NUMA_NODE_COUNT; i++)
 		mm->repl_steering[i] = -1;
 
@@ -395,8 +397,6 @@ int mitosis_enable(struct mm_struct *mm)
 	mitosis_link_page_replicas(pgd_pages, count);
 
 	smp_store_release(&mm->repl_pgd_enabled, true);
-
-	static_branch_enable(&mitosis_repl_ever_enabled);
 
 	mitosis_stats_attach(mm, base_node);
 	mitosis_stats_seed(mm);
