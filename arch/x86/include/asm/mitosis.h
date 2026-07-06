@@ -48,9 +48,10 @@ pmd_t mitosis_get_pmd(pmd_t *pmdp);
 
 extern struct mitosis_cache_head mitosis_cache[NUMA_NODE_COUNT];
 
-bool mitosis_cache_push(struct page *page, int node, int level);
+bool mitosis_cache_push(struct page *page, int node, int level,
+			struct mm_struct *owner_mm);
 
-struct page *mitosis_cache_pop(int node, int level);
+struct page *mitosis_cache_pop(int node, int level, struct mm_struct *owner_mm);
 
 int mitosis_cache_drain_node(int node);
 

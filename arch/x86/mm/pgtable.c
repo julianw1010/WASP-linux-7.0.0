@@ -27,6 +27,7 @@ static void mitosis_free_tlb_page(struct mmu_gather *tlb, struct page *page,
 	struct ptdesc *ptdesc = page_ptdesc(page);
 	int nid = page_to_nid(page);
 	bool from_cache = PageMitosisFromCache(page);
+	struct mm_struct *owner_mm = page->pt_owner_mm;
 
 	mitosis_pt_account_page(page, level, -1);
 
@@ -38,7 +39,7 @@ static void mitosis_free_tlb_page(struct mmu_gather *tlb, struct page *page,
 
 	if (from_cache) {
 		page->pt_replica = NULL;
-		if (mitosis_cache_push(page, nid, level))
+		if (mitosis_cache_push(page, nid, level, owner_mm))
 			return;
 	}
 
@@ -362,7 +363,7 @@ static inline pgd_t *_pgd_alloc(struct mm_struct *mm)
 
 		page = NULL;
 		if (order == 0)
-			page = mitosis_cache_pop(node, MITOSIS_CACHE_PGD);
+			page = mitosis_cache_pop(node, MITOSIS_CACHE_PGD, mm);
 		if (!page)
 			page = alloc_pages_node(node,
 						GFP_PGTABLE_USER | __GFP_THISNODE,
@@ -397,7 +398,7 @@ static inline void _pgd_free(struct mm_struct *mm, pgd_t *pgd)
 
 		if (from_cache) {
 			page->pt_replica = NULL;
-			if (mitosis_cache_push(page, nid, MITOSIS_CACHE_PGD))
+			if (mitosis_cache_push(page, nid, MITOSIS_CACHE_PGD, mm))
 				return;
 		}
 	} else {

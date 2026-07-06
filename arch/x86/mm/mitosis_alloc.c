@@ -47,7 +47,7 @@ int mitosis_alloc_pte_replicas(struct page *base_page, struct mm_struct *mm,
 		if (i == base_node)
 			continue;
 
-		new_page = mitosis_cache_pop(i, 0);
+		new_page = mitosis_cache_pop(i, 0, mm);
 		if (!new_page) {
 			new_page = alloc_pages_node(i,
 				GFP_NOWAIT | GFP_ATOMIC | __GFP_ZERO | __GFP_THISNODE, 0);
@@ -106,7 +106,7 @@ int mitosis_alloc_pmd_replicas(struct page *base_page, struct mm_struct *mm,
 		if (i == base_node)
 			continue;
 
-		new_page = mitosis_cache_pop(i, 0);
+		new_page = mitosis_cache_pop(i, 0, mm);
 		if (!new_page) {
 			new_page = alloc_pages_node(i,
 				GFP_NOWAIT | GFP_ATOMIC | __GFP_ZERO | __GFP_THISNODE, 0);
@@ -165,7 +165,7 @@ int mitosis_alloc_pud_replicas(struct page *base_page, struct mm_struct *mm,
 		if (i == base_node)
 			continue;
 
-		new_page = mitosis_cache_pop(i, 0);
+		new_page = mitosis_cache_pop(i, 0, mm);
 		if (!new_page) {
 			new_page = alloc_pages_node(i,
 				GFP_NOWAIT | GFP_ATOMIC | __GFP_ZERO | __GFP_THISNODE, 0);
@@ -222,7 +222,7 @@ int mitosis_alloc_p4d_replicas(struct page *base_page, struct mm_struct *mm,
 		if (i == base_node)
 			continue;
 
-		new_page = mitosis_cache_pop(i, 0);
+		new_page = mitosis_cache_pop(i, 0, mm);
 		if (!new_page) {
 			new_page = alloc_pages_node(i,
 				GFP_NOWAIT | GFP_ATOMIC | __GFP_ZERO | __GFP_THISNODE, 0);
@@ -277,7 +277,7 @@ int mitosis_alloc_pgd_replicas(struct page *base_page, struct mm_struct *mm,
 
 		new_page = NULL;
 		if (alloc_order == 0)
-			new_page = mitosis_cache_pop(i, 0);
+			new_page = mitosis_cache_pop(i, 0, mm);
 		if (!new_page) {
 			new_page = alloc_pages_node(i,
 				GFP_NOWAIT | GFP_ATOMIC | __GFP_ZERO | __GFP_THISNODE,
@@ -346,7 +346,7 @@ int mitosis_free_replica_chain(struct page *primary, int level, int order)
 
 			if (from_cache) {
 				p->pt_replica = NULL;
-				if (mitosis_cache_push(p, nid, level))
+				if (mitosis_cache_push(p, nid, level, owner_mm))
 					continue;
 			}
 		}

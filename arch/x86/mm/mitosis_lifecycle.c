@@ -614,7 +614,7 @@ void mitosis_disable(struct mm_struct *mm)
 		if (alloc_order == 0 && from_cache) {
 			ClearPageMitosisFromCache(replica_page);
 			replica_page->pt_replica = NULL;
-			if (mitosis_cache_push(replica_page, node, MITOSIS_CACHE_PGD)) {
+			if (mitosis_cache_push(replica_page, node, MITOSIS_CACHE_PGD, mm)) {
 				mm->pgd_replicas[node] = NULL;
 				continue;
 			}

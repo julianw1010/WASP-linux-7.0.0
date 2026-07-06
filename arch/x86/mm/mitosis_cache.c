@@ -16,7 +16,13 @@ struct mitosis_cache_head mitosis_cache[NUMA_NODE_COUNT] = {
 	}
 };
 
-bool mitosis_cache_push(struct page *page, int node, int level)
+static bool mitosis_cache_counted(struct mm_struct *owner_mm)
+{
+	return owner_mm && (owner_mm->repl_pgd_enabled || owner_mm->cache_only_mode);
+}
+
+bool mitosis_cache_push(struct page *page, int node, int level,
+			struct mm_struct *owner_mm)
 {
 	struct mitosis_cache_head *cache;
 	unsigned long flags;
@@ -35,13 +41,14 @@ bool mitosis_cache_push(struct page *page, int node, int level)
 	page->pt_replica = cache->head;
 	cache->head = page;
 	atomic_inc(&cache->count);
-	atomic64_inc(&cache->returns);
+	if (mitosis_cache_counted(owner_mm))
+		atomic64_inc(&cache->returns);
 	spin_unlock_irqrestore(&cache->lock, flags);
 
 	return true;
 }
 
-struct page *mitosis_cache_pop(int node, int level)
+struct page *mitosis_cache_pop(int node, int level, struct mm_struct *owner_mm)
 {
 	struct mitosis_cache_head *cache;
 	struct page *page;
@@ -58,12 +65,14 @@ struct page *mitosis_cache_pop(int node, int level)
 	page = cache->head;
 	if (!page) {
 		spin_unlock_irqrestore(&cache->lock, flags);
-		atomic64_inc(&cache->misses);
+		if (mitosis_cache_counted(owner_mm))
+			atomic64_inc(&cache->misses);
 		return NULL;
 	}
 	cache->head = page->pt_replica;
 	atomic_dec(&cache->count);
-	atomic64_inc(&cache->hits);
+	if (mitosis_cache_counted(owner_mm))
+		atomic64_inc(&cache->hits);
 	spin_unlock_irqrestore(&cache->lock, flags);
 
 	page->pt_replica = NULL;
