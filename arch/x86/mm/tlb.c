@@ -507,6 +507,7 @@ static void broadcast_tlb_flush(struct flush_tlb_info *info)
 	bool pmd = info->stride_shift == PMD_SHIFT;
 	unsigned long asid = mm_global_asid(info->mm);
 	unsigned long addr = info->start;
+	long invlpgbs = 0;
 
 	/*
 	 * TLB flushes with INVLPGB are kicked off asynchronously.
@@ -515,9 +516,12 @@ static void broadcast_tlb_flush(struct flush_tlb_info *info)
 	 */
 	if (info->end == TLB_FLUSH_ALL) {
 		invlpgb_flush_single_pcid_nosync(kern_pcid(asid));
+		invlpgbs++;
 		/* Do any CPUs supporting INVLPGB need PTI? */
-		if (cpu_feature_enabled(X86_FEATURE_PTI))
+		if (cpu_feature_enabled(X86_FEATURE_PTI)) {
 			invlpgb_flush_single_pcid_nosync(user_pcid(asid));
+			invlpgbs++;
+		}
 	} else do {
 		unsigned long nr = 1;
 
@@ -527,11 +531,16 @@ static void broadcast_tlb_flush(struct flush_tlb_info *info)
 		}
 
 		invlpgb_flush_user_nr_nosync(kern_pcid(asid), addr, nr, pmd);
-		if (cpu_feature_enabled(X86_FEATURE_PTI))
+		invlpgbs++;
+		if (cpu_feature_enabled(X86_FEATURE_PTI)) {
 			invlpgb_flush_user_nr_nosync(user_pcid(asid), addr, nr, pmd);
+			invlpgbs++;
+		}
 
 		addr += nr << info->stride_shift;
 	} while (addr < info->end);
+
+	mitosis_stats_tlb_broadcast(info->mm, invlpgbs);
 
 	finish_asid_transition(info);
 

@@ -23,6 +23,7 @@ struct mitosis_stats {
 	atomic_long_t withdrawals;
 
 	atomic_long_t tlb_shootdowns;
+	atomic_long_t tlb_broadcasts;
 
 	atomic_long_t numa_migrate_4k[NUMA_NODE_COUNT][NUMA_NODE_COUNT];
 	atomic_long_t numa_migrate_2m[NUMA_NODE_COUNT][NUMA_NODE_COUNT];
@@ -80,6 +81,12 @@ static inline void mitosis_stats_tlb(struct mm_struct *mm, long count)
 {
 	if (count > 0 && mm->mitosis_stats)
 		atomic_long_add(count, &mm->mitosis_stats->tlb_shootdowns);
+}
+
+static inline void mitosis_stats_tlb_broadcast(struct mm_struct *mm, long count)
+{
+	if (count > 0 && mm->mitosis_stats)
+		atomic_long_add(count, &mm->mitosis_stats->tlb_broadcasts);
 }
 
 static inline void mitosis_stats_numa(struct mm_struct *mm, bool huge,
