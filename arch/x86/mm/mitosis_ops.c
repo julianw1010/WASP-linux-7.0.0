@@ -387,93 +387,46 @@ native_only:
 	native_set_pgd(pgdp, pgdval);
 }
 
-static unsigned long repl_get_entry(void *entryp)
+pte_t mitosis_get_pte(pte_t *ptep)
 {
 	struct page *page;
 	struct page *cur_page;
 	struct page *start_page;
 	unsigned long offset;
-	unsigned long val;
+	pte_t val;
 
-	if (!entryp)
-		return 0;
+	if (!ptep)
+		return __pte(0);
 
 	if (!static_branch_unlikely(&mitosis_repl_ever_enabled))
-		return *(unsigned long *)entryp;
+		return *ptep;
 
-	if (!virt_addr_valid(entryp))
-		return *(unsigned long *)entryp;
+	if (!virt_addr_valid(ptep))
+		return *ptep;
 
-	page = virt_to_page(entryp);
+	page = virt_to_page(ptep);
 
 	if (!page || !pfn_valid(page_to_pfn(page)) ||
 	    !page->pt_replica)
-		return *(unsigned long *)entryp;
+		return *ptep;
 
-	val = 0;
-	offset = ((unsigned long)entryp) & ~PAGE_MASK;
+	val = __pte(0);
+	offset = ((unsigned long)ptep) & ~PAGE_MASK;
 	start_page = page;
 	cur_page = page;
 
 	do {
-		unsigned long *replica_entry =
-			(unsigned long *)(page_address(cur_page) + offset);
-		unsigned long entry_val = *replica_entry;
+		pte_t entry_val =
+			*(pte_t *)(page_address(cur_page) + offset);
 
 		if (cur_page == start_page) {
 			val = entry_val;
-			if (!(entry_val & _PAGE_PRESENT))
+			if (!(pte_val(entry_val) & _PAGE_PRESENT))
 				break;
-		} else if (entry_val & _PAGE_PRESENT) {
-			val |= entry_val & PTE_FLAGS_MASK;
+		} else if (pte_val(entry_val) & _PAGE_PRESENT) {
+			val = __pte(pte_val(val) |
+				    (pte_val(entry_val) & PTE_FLAGS_MASK));
 		}
-		cur_page = cur_page->pt_replica;
-	} while (cur_page && cur_page != start_page);
-	return val;
-}
-
-pte_t mitosis_get_pte(pte_t *ptep)
-{
-	return __pte(repl_get_entry(ptep));
-}
-
-static unsigned long repl_get_and_clear_entry(void *entryp)
-{
-	struct page *page;
-	struct page *cur_page;
-	struct page *start_page;
-	unsigned long offset;
-	unsigned long val = 0;
-
-	if (!entryp)
-		return 0;
-
-	if (!static_branch_unlikely(&mitosis_repl_ever_enabled))
-		return xchg((unsigned long *)entryp, 0);
-
-	if (!virt_addr_valid(entryp))
-		return xchg((unsigned long *)entryp, 0);
-
-	page = virt_to_page(entryp);
-
-	if (!page || !pfn_valid(page_to_pfn(page)) ||
-	    !page->pt_replica)
-		return xchg((unsigned long *)entryp, 0);
-
-	offset = ((unsigned long)entryp) & ~PAGE_MASK;
-	start_page = page;
-	cur_page = page;
-
-	do {
-		unsigned long *replica_entry =
-			(unsigned long *)(page_address(cur_page) + offset);
-		unsigned long old_val = xchg(replica_entry, 0);
-
-		if (cur_page == start_page)
-			val = old_val;
-		else
-			val |= old_val & PTE_FLAGS_MASK;
-
 		cur_page = cur_page->pt_replica;
 	} while (cur_page && cur_page != start_page);
 	return val;
@@ -481,7 +434,45 @@ static unsigned long repl_get_and_clear_entry(void *entryp)
 
 pte_t mitosis_ptep_get_and_clear(struct mm_struct *mm, pte_t *ptep)
 {
-	return __pte(repl_get_and_clear_entry(ptep));
+	struct page *page;
+	struct page *cur_page;
+	struct page *start_page;
+	unsigned long offset;
+	pte_t val;
+
+	if (!ptep)
+		return __pte(0);
+
+	if (!static_branch_unlikely(&mitosis_repl_ever_enabled))
+		return native_ptep_get_and_clear(ptep);
+
+	if (!virt_addr_valid(ptep))
+		return native_ptep_get_and_clear(ptep);
+
+	page = virt_to_page(ptep);
+
+	if (!page || !pfn_valid(page_to_pfn(page)) ||
+	    !page->pt_replica)
+		return native_ptep_get_and_clear(ptep);
+
+	val = __pte(0);
+	offset = ((unsigned long)ptep) & ~PAGE_MASK;
+	start_page = page;
+	cur_page = page;
+
+	do {
+		pte_t old_val = native_ptep_get_and_clear(
+			(pte_t *)(page_address(cur_page) + offset));
+
+		if (cur_page == start_page)
+			val = old_val;
+		else
+			val = __pte(pte_val(val) |
+				    (pte_val(old_val) & PTE_FLAGS_MASK));
+
+		cur_page = cur_page->pt_replica;
+	} while (cur_page && cur_page != start_page);
+	return val;
 }
 
 static void repl_wrprotect_pte_one(pte_t *ptep)
@@ -590,7 +581,8 @@ void mitosis_ptep_set_wrprotect(struct mm_struct *mm,
 	repl_set_wrprotect_pte_entry(ptep);
 }
 
-static int repl_test_and_clear_young_entry(void *entryp)
+int mitosis_ptep_test_and_clear_young(struct vm_area_struct *vma,
+					   unsigned long addr, pte_t *ptep)
 {
 	struct page *page;
 	struct page *cur_page;
@@ -601,31 +593,32 @@ static int repl_test_and_clear_young_entry(void *entryp)
 	if (!static_branch_unlikely(&mitosis_repl_ever_enabled))
 		goto native_only;
 
-	if (!entryp || !virt_addr_valid(entryp))
+	if (!ptep || !virt_addr_valid(ptep))
 		goto native_only;
 
-	page = virt_to_page(entryp);
+	page = virt_to_page(ptep);
 
 	if (!page || !pfn_valid(page_to_pfn(page)))
 		goto native_only;
 
 	if (!page->pt_replica) {
-		if (test_bit(_PAGE_BIT_ACCESSED, (unsigned long *)entryp))
+		if (pte_young(*ptep))
 			young = test_and_clear_bit(_PAGE_BIT_ACCESSED,
-						   (unsigned long *)entryp);
+						   (unsigned long *)&ptep->pte);
 		return young;
 	}
 
-	offset = ((unsigned long)entryp) & ~PAGE_MASK;
+	offset = ((unsigned long)ptep) & ~PAGE_MASK;
 	start_page = page;
 	cur_page = page;
 
 	do {
-		unsigned long *replica_entry =
-			(unsigned long *)(page_address(cur_page) + offset);
+		pte_t *replica_entry =
+			(pte_t *)(page_address(cur_page) + offset);
 
-		if (test_bit(_PAGE_BIT_ACCESSED, replica_entry)) {
-			if (test_and_clear_bit(_PAGE_BIT_ACCESSED, replica_entry))
+		if (pte_young(*replica_entry)) {
+			if (test_and_clear_bit(_PAGE_BIT_ACCESSED,
+					       (unsigned long *)&replica_entry->pte))
 				young = 1;
 		}
 
@@ -634,21 +627,53 @@ static int repl_test_and_clear_young_entry(void *entryp)
 	return young;
 
 native_only:
-	if (test_bit(_PAGE_BIT_ACCESSED, (unsigned long *)entryp))
+	if (pte_young(*ptep))
 		young = test_and_clear_bit(_PAGE_BIT_ACCESSED,
-					   (unsigned long *)entryp);
+					   (unsigned long *)&ptep->pte);
 	return young;
-}
-
-int mitosis_ptep_test_and_clear_young(struct vm_area_struct *vma,
-					   unsigned long addr, pte_t *ptep)
-{
-	return repl_test_and_clear_young_entry(ptep);
 }
 
 pmd_t mitosis_pmdp_huge_get_and_clear(struct mm_struct *mm, pmd_t *pmdp)
 {
-	return __pmd(repl_get_and_clear_entry(pmdp));
+	struct page *page;
+	struct page *cur_page;
+	struct page *start_page;
+	unsigned long offset;
+	pmd_t val;
+
+	if (!pmdp)
+		return __pmd(0);
+
+	if (!static_branch_unlikely(&mitosis_repl_ever_enabled))
+		return native_pmdp_get_and_clear(pmdp);
+
+	if (!virt_addr_valid(pmdp))
+		return native_pmdp_get_and_clear(pmdp);
+
+	page = virt_to_page(pmdp);
+
+	if (!page || !pfn_valid(page_to_pfn(page)) ||
+	    !page->pt_replica)
+		return native_pmdp_get_and_clear(pmdp);
+
+	val = __pmd(0);
+	offset = ((unsigned long)pmdp) & ~PAGE_MASK;
+	start_page = page;
+	cur_page = page;
+
+	do {
+		pmd_t old_val = native_pmdp_get_and_clear(
+			(pmd_t *)(page_address(cur_page) + offset));
+
+		if (cur_page == start_page)
+			val = old_val;
+		else
+			val = __pmd(pmd_val(val) |
+				    (pmd_val(old_val) & PTE_FLAGS_MASK));
+
+		cur_page = cur_page->pt_replica;
+	} while (cur_page && cur_page != start_page);
+	return val;
 }
 
 void mitosis_pmdp_set_wrprotect(struct mm_struct *mm,
@@ -730,10 +755,96 @@ native_only:
 int mitosis_pmdp_test_and_clear_young(struct vm_area_struct *vma,
 					   unsigned long addr, pmd_t *pmdp)
 {
-	return repl_test_and_clear_young_entry(pmdp);
+	struct page *page;
+	struct page *cur_page;
+	struct page *start_page;
+	unsigned long offset;
+	int young = 0;
+
+	if (!static_branch_unlikely(&mitosis_repl_ever_enabled))
+		goto native_only;
+
+	if (!pmdp || !virt_addr_valid(pmdp))
+		goto native_only;
+
+	page = virt_to_page(pmdp);
+
+	if (!page || !pfn_valid(page_to_pfn(page)))
+		goto native_only;
+
+	if (!page->pt_replica) {
+		if (pmd_young(*pmdp))
+			young = test_and_clear_bit(_PAGE_BIT_ACCESSED,
+						   (unsigned long *)pmdp);
+		return young;
+	}
+
+	offset = ((unsigned long)pmdp) & ~PAGE_MASK;
+	start_page = page;
+	cur_page = page;
+
+	do {
+		pmd_t *replica_entry =
+			(pmd_t *)(page_address(cur_page) + offset);
+
+		if (pmd_young(*replica_entry)) {
+			if (test_and_clear_bit(_PAGE_BIT_ACCESSED,
+					       (unsigned long *)replica_entry))
+				young = 1;
+		}
+
+		cur_page = cur_page->pt_replica;
+	} while (cur_page && cur_page != start_page);
+	return young;
+
+native_only:
+	if (pmd_young(*pmdp))
+		young = test_and_clear_bit(_PAGE_BIT_ACCESSED,
+					   (unsigned long *)pmdp);
+	return young;
 }
 
 pmd_t mitosis_get_pmd(pmd_t *pmdp)
 {
-	return __pmd(repl_get_entry(pmdp));
+	struct page *page;
+	struct page *cur_page;
+	struct page *start_page;
+	unsigned long offset;
+	pmd_t val;
+
+	if (!pmdp)
+		return __pmd(0);
+
+	if (!static_branch_unlikely(&mitosis_repl_ever_enabled))
+		return *pmdp;
+
+	if (!virt_addr_valid(pmdp))
+		return *pmdp;
+
+	page = virt_to_page(pmdp);
+
+	if (!page || !pfn_valid(page_to_pfn(page)) ||
+	    !page->pt_replica)
+		return *pmdp;
+
+	val = __pmd(0);
+	offset = ((unsigned long)pmdp) & ~PAGE_MASK;
+	start_page = page;
+	cur_page = page;
+
+	do {
+		pmd_t entry_val =
+			*(pmd_t *)(page_address(cur_page) + offset);
+
+		if (cur_page == start_page) {
+			val = entry_val;
+			if (!(pmd_val(entry_val) & _PAGE_PRESENT))
+				break;
+		} else if (pmd_val(entry_val) & _PAGE_PRESENT) {
+			val = __pmd(pmd_val(val) |
+				    (pmd_val(entry_val) & PTE_FLAGS_MASK));
+		}
+		cur_page = cur_page->pt_replica;
+	} while (cur_page && cur_page != start_page);
+	return val;
 }
