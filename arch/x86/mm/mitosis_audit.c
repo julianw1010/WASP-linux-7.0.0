@@ -14,7 +14,7 @@
 #include <asm/mitosis.h>
 #include <linux/mitosis_stats.h>
 
-#define MITOSIS_AUDIT_AD (_PAGE_ACCESSED | _PAGE_DIRTY)
+#define MITOSIS_AUDIT_AD (_PAGE_ACCESSED | _PAGE_DIRTY | _PAGE_SAVED_DIRTY)
 
 struct mitosis_audit_result {
 	int valid;
