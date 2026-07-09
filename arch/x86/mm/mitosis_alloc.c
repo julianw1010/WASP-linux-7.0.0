@@ -4,6 +4,7 @@
 #include <linux/string.h>
 #include <asm/pgtable.h>
 #include <asm/pgalloc.h>
+#include <asm/tlb.h>
 #include <asm/mitosis.h>
 #include <asm/io.h>
 #include <asm/cacheflush.h>
@@ -295,7 +296,8 @@ int mitosis_alloc_pgd_replicas(struct page *base_page, struct mm_struct *mm,
 	return 0;
 }
 
-int mitosis_free_replica_chain(struct page *primary, int level, int order)
+int mitosis_free_replica_chain(struct page *primary, int level, int order,
+			       struct mmu_gather *tlb)
 {
 	struct page *cur_page, *next_page, *start_page;
 	struct page *pages_to_free[NUMA_NODE_COUNT];
@@ -335,6 +337,16 @@ int mitosis_free_replica_chain(struct page *primary, int level, int order)
 				mm_dec_nr_pmds(owner_mm);
 			else if (level == MITOSIS_CACHE_PUD)
 				mm_dec_nr_puds(owner_mm);
+		}
+
+		if (tlb) {
+			if (PageMitosisFromCache(p)) {
+				mitosis_cache_defer(tlb, p);
+				continue;
+			}
+			p->pt_owner_mm = NULL;
+			tlb_remove_page(tlb, p);
+			continue;
 		}
 
 		if (order == 0) {
@@ -418,7 +430,7 @@ void mitosis_release_pte(unsigned long pfn)
 	if (!pfn_valid(pfn))
 		return;
 
-	mitosis_free_replica_chain(pfn_to_page(pfn), MITOSIS_CACHE_PTE, 0);
+	mitosis_free_replica_chain(pfn_to_page(pfn), MITOSIS_CACHE_PTE, 0, NULL);
 }
 
 void mitosis_release_pmd(unsigned long pfn)
@@ -426,7 +438,7 @@ void mitosis_release_pmd(unsigned long pfn)
 	if (!pfn_valid(pfn))
 		return;
 
-	mitosis_free_replica_chain(pfn_to_page(pfn), MITOSIS_CACHE_PMD, 0);
+	mitosis_free_replica_chain(pfn_to_page(pfn), MITOSIS_CACHE_PMD, 0, NULL);
 }
 
 void mitosis_release_pud(unsigned long pfn)
@@ -434,7 +446,7 @@ void mitosis_release_pud(unsigned long pfn)
 	if (!pfn_valid(pfn))
 		return;
 
-	mitosis_free_replica_chain(pfn_to_page(pfn), MITOSIS_CACHE_PUD, 0);
+	mitosis_free_replica_chain(pfn_to_page(pfn), MITOSIS_CACHE_PUD, 0, NULL);
 }
 
 void mitosis_release_p4d(unsigned long pfn)
@@ -442,5 +454,5 @@ void mitosis_release_p4d(unsigned long pfn)
 	if (!pgtable_l5_enabled() || !pfn_valid(pfn))
 		return;
 
-	mitosis_free_replica_chain(pfn_to_page(pfn), MITOSIS_CACHE_P4D, 0);
+	mitosis_free_replica_chain(pfn_to_page(pfn), MITOSIS_CACHE_P4D, 0, NULL);
 }

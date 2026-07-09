@@ -3,6 +3,7 @@
 #include <linux/spinlock.h>
 #include <linux/highmem.h>
 #include <linux/page-flags.h>
+#include <asm/tlb.h>
 #include <asm/mitosis.h>
 
 struct mitosis_cache_head mitosis_cache[NUMA_NODE_COUNT] = {
@@ -122,4 +123,51 @@ int mitosis_cache_drain_all(void)
 	}
 
 	return total;
+}
+
+void mitosis_cache_count_return(struct mm_struct *owner_mm, int node)
+{
+	if (node < 0 || node >= NUMA_NODE_COUNT)
+		return;
+
+	if (mitosis_cache_counted(owner_mm))
+		atomic64_inc(&mitosis_cache[node].returns);
+}
+
+void mitosis_cache_defer(struct mmu_gather *tlb, struct page *page)
+{
+	page->pt_replica = tlb->mitosis_deferred_cache;
+	tlb->mitosis_deferred_cache = page;
+}
+
+void mitosis_cache_defer_drain(struct mmu_gather *tlb)
+{
+	struct page *page = tlb->mitosis_deferred_cache;
+
+	tlb->mitosis_deferred_cache = NULL;
+
+	while (page) {
+		struct page *next = page->pt_replica;
+		struct mm_struct *owner_mm = page->pt_owner_mm;
+
+		page->pt_replica = NULL;
+		if (!mitosis_cache_push(page, page_to_nid(page), 0, owner_mm))
+			__free_page(page);
+		page = next;
+	}
+}
+
+bool mitosis_cache_return_table(struct ptdesc *ptdesc)
+{
+	struct page *page = ptdesc_page(ptdesc);
+
+	if (!PageMitosisFromCache(page))
+		return false;
+
+	pagetable_dtor(ptdesc);
+
+	if (!mitosis_cache_push(page, page_to_nid(page), 0, NULL))
+		__free_page(page);
+
+	return true;
 }

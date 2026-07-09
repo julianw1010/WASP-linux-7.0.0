@@ -609,7 +609,7 @@ void mitosis_pmdp_set_wrprotect(struct mm_struct *mm,
 
 void mitosis_free_pte_replicas(struct mm_struct *mm, struct page *page)
 {
-	mitosis_free_replica_chain(page, MITOSIS_CACHE_PTE, 0);
+	mitosis_free_replica_chain(page, MITOSIS_CACHE_PTE, 0, NULL);
 
 }
 

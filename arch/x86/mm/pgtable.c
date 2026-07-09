@@ -24,42 +24,28 @@ pgtable_t pte_alloc_one(struct mm_struct *mm, pmd_t *pmd)
 static void mitosis_free_tlb_page(struct mmu_gather *tlb, struct page *page,
 				  int level)
 {
-	struct ptdesc *ptdesc = page_ptdesc(page);
-	int nid = page_to_nid(page);
-	bool from_cache = PageMitosisFromCache(page);
-	struct mm_struct *owner_mm = page->pt_owner_mm;
+	mitosis_free_replica_chain(page, level, 0, tlb);
 
 	mitosis_pt_account_page(page, level, -1);
-
-	if (from_cache)
-		pagetable_dtor(ptdesc);
-
+	if (PageMitosisFromCache(page))
+		mitosis_cache_count_return(page->pt_owner_mm, page_to_nid(page));
 	page->pt_owner_mm = NULL;
-	ClearPageMitosisFromCache(page);
-
-	if (from_cache) {
-		page->pt_replica = NULL;
-		if (mitosis_cache_push(page, nid, level, owner_mm))
-			return;
-	}
-
-	if (from_cache)
-		pagetable_free(ptdesc);
-	else
-		tlb_remove_ptdesc(tlb, ptdesc);
+	tlb_remove_ptdesc(tlb, page_ptdesc(page));
 }
 
 void ___pte_free_tlb(struct mmu_gather *tlb, struct page *pte)
 {
-	paravirt_release_pte(page_to_pfn(pte));
-
 	mitosis_free_tlb_page(tlb, pte, MITOSIS_CACHE_PTE);
+
+	paravirt_release_pte(page_to_pfn(pte));
 }
 
 #if CONFIG_PGTABLE_LEVELS > 2
 void ___pmd_free_tlb(struct mmu_gather *tlb, pmd_t *pmd)
 {
 	struct page *page = ptdesc_page(virt_to_ptdesc(pmd));
+
+	mitosis_free_tlb_page(tlb, page, MITOSIS_CACHE_PMD);
 
 	paravirt_release_pmd(__pa(pmd) >> PAGE_SHIFT);
 	/*
@@ -70,7 +56,6 @@ void ___pmd_free_tlb(struct mmu_gather *tlb, pmd_t *pmd)
 #ifdef CONFIG_X86_PAE
 	tlb->need_flush_all = 1;
 #endif
-	mitosis_free_tlb_page(tlb, page, MITOSIS_CACHE_PMD);
 }
 
 #if CONFIG_PGTABLE_LEVELS > 3
@@ -78,9 +63,9 @@ void ___pud_free_tlb(struct mmu_gather *tlb, pud_t *pud)
 {
 	struct page *page = ptdesc_page(virt_to_ptdesc(pud));
 
-	paravirt_release_pud(__pa(pud) >> PAGE_SHIFT);
-
 	mitosis_free_tlb_page(tlb, page, MITOSIS_CACHE_PUD);
+
+	paravirt_release_pud(__pa(pud) >> PAGE_SHIFT);
 }
 
 #if CONFIG_PGTABLE_LEVELS > 4
@@ -88,9 +73,9 @@ void ___p4d_free_tlb(struct mmu_gather *tlb, p4d_t *p4d)
 {
 	struct page *page = ptdesc_page(virt_to_ptdesc(p4d));
 
-	paravirt_release_p4d(__pa(p4d) >> PAGE_SHIFT);
-
 	mitosis_free_tlb_page(tlb, page, MITOSIS_CACHE_P4D);
+
+	paravirt_release_p4d(__pa(p4d) >> PAGE_SHIFT);
 }
 #endif	/* CONFIG_PGTABLE_LEVELS > 4 */
 #endif	/* CONFIG_PGTABLE_LEVELS > 3 */

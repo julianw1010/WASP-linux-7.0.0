@@ -362,7 +362,7 @@ int mitosis_enable(struct mm_struct *mm)
 		node_set(base_node, nodes);
 
 	if (base_page->pt_replica)
-		mitosis_free_replica_chain(base_page, MITOSIS_CACHE_PGD, mitosis_pgd_alloc_order());
+		mitosis_free_replica_chain(base_page, MITOSIS_CACHE_PGD, mitosis_pgd_alloc_order(), NULL);
 
 	base_page->pt_replica = NULL;
 
@@ -507,6 +507,8 @@ void mitosis_disable(struct mm_struct *mm)
 
 	synchronize_rcu();
 
+	flush_tlb_mm(mm);
+
 	pgd = mm->pgd;
 
 	for (pgd_idx = 0; pgd_idx < KERNEL_PGD_BOUNDARY; pgd_idx++) {
@@ -521,7 +523,7 @@ void mitosis_disable(struct mm_struct *mm)
 		if (pgtable_l5_enabled()) {
 			child_phys = pgd_val(pgdval) & PTE_PFN_MASK;
 			if (child_phys)
-				mitosis_free_replica_chain(pfn_to_page(child_phys >> PAGE_SHIFT), MITOSIS_CACHE_P4D, 0);
+				mitosis_free_replica_chain(pfn_to_page(child_phys >> PAGE_SHIFT), MITOSIS_CACHE_P4D, 0, NULL);
 		}
 
 		p4d_base = p4d_offset(&pgd[pgd_idx], 0);
@@ -540,7 +542,7 @@ void mitosis_disable(struct mm_struct *mm)
 			if (child_phys) {
 				spinlock_t *ptl = pud_lock(mm, pud_base);
 
-				mitosis_free_replica_chain(pfn_to_page(child_phys >> PAGE_SHIFT), MITOSIS_CACHE_PUD, 0);
+				mitosis_free_replica_chain(pfn_to_page(child_phys >> PAGE_SHIFT), MITOSIS_CACHE_PUD, 0, NULL);
 				spin_unlock(ptl);
 			}
 
@@ -558,7 +560,7 @@ void mitosis_disable(struct mm_struct *mm)
 				if (child_phys) {
 					spinlock_t *ptl = pmd_lock(mm, pmd_base);
 
-					mitosis_free_replica_chain(pfn_to_page(child_phys >> PAGE_SHIFT), MITOSIS_CACHE_PMD, 0);
+					mitosis_free_replica_chain(pfn_to_page(child_phys >> PAGE_SHIFT), MITOSIS_CACHE_PMD, 0, NULL);
 					spin_unlock(ptl);
 				}
 
@@ -574,7 +576,7 @@ void mitosis_disable(struct mm_struct *mm)
 						spinlock_t *ptl = pte_lockptr(mm, &pmd_base[pmd_idx]);
 
 						spin_lock(ptl);
-						mitosis_free_replica_chain(pfn_to_page(child_phys >> PAGE_SHIFT), MITOSIS_CACHE_PTE, 0);
+						mitosis_free_replica_chain(pfn_to_page(child_phys >> PAGE_SHIFT), MITOSIS_CACHE_PTE, 0, NULL);
 						spin_unlock(ptl);
 					}
 				}

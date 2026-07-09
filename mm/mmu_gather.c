@@ -402,6 +402,7 @@ static void tlb_flush_mmu_free(struct mmu_gather *tlb)
 void tlb_flush_mmu(struct mmu_gather *tlb)
 {
 	tlb_flush_mmu_tlbonly(tlb);
+	mitosis_cache_defer_drain(tlb);
 	tlb_flush_mmu_free(tlb);
 }
 
@@ -420,6 +421,7 @@ static void __tlb_gather_mmu(struct mmu_gather *tlb, struct mm_struct *mm,
 	tlb->batch_count = 0;
 #endif
 	tlb->delayed_rmap = 0;
+	tlb->mitosis_deferred_cache = NULL;
 
 	tlb_table_init(tlb);
 #ifdef CONFIG_MMU_GATHER_PAGE_SIZE

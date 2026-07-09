@@ -213,10 +213,18 @@ struct mmu_table_batch {
 #define MAX_TABLE_BATCH		\
 	((PAGE_SIZE - sizeof(struct mmu_table_batch)) / sizeof(void *))
 
+struct mmu_gather;
+void mitosis_cache_defer(struct mmu_gather *tlb, struct page *page);
+void mitosis_cache_defer_drain(struct mmu_gather *tlb);
+bool mitosis_cache_return_table(struct ptdesc *ptdesc);
+
 #ifndef CONFIG_HAVE_ARCH_TLB_REMOVE_TABLE
 static inline void __tlb_remove_table(void *table)
 {
 	struct ptdesc *ptdesc = (struct ptdesc *)table;
+
+	if (mitosis_cache_return_table(ptdesc))
+		return;
 
 	pagetable_dtor_free(ptdesc);
 }
@@ -379,6 +387,8 @@ struct mmu_gather {
 	unsigned int		fully_unshared_tables : 1;
 
 	unsigned int		batch_count;
+
+	struct page		*mitosis_deferred_cache;
 
 #ifndef CONFIG_MMU_GATHER_NO_GATHER
 	struct mmu_gather_batch *active;

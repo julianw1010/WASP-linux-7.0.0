@@ -14,6 +14,7 @@
 struct ctl_table;
 struct vm_area_struct;
 struct seq_file;
+struct mmu_gather;
 
 DECLARE_STATIC_KEY_FALSE(mitosis_repl_ever_enabled);
 
@@ -56,6 +57,8 @@ struct page *mitosis_cache_pop(int node, int level, struct mm_struct *owner_mm);
 int mitosis_cache_drain_node(int node);
 
 int mitosis_cache_drain_all(void);
+
+void mitosis_cache_count_return(struct mm_struct *owner_mm, int node);
 
 #ifdef CONFIG_MITIGATION_PAGE_TABLE_ISOLATION
 #include <asm/pti.h>
@@ -162,7 +165,8 @@ int mitosis_alloc_p4d_replicas(struct page *base_page, struct mm_struct *mm,
 		       struct page **pages, int *count);
 int mitosis_alloc_pgd_replicas(struct page *base_page, struct mm_struct *mm,
 		       struct page **pages, int *count);
-int mitosis_free_replica_chain(struct page *primary, int level, int order);
+int mitosis_free_replica_chain(struct page *primary, int level, int order,
+			       struct mmu_gather *tlb);
 
 void mitosis_pt_account_mm(struct mm_struct *mm, int node, int level, int delta);
 void mitosis_pt_account_page(struct page *page, int level, int delta);
