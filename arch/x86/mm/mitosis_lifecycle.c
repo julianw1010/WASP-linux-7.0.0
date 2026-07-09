@@ -507,6 +507,8 @@ void mitosis_disable(struct mm_struct *mm)
 
 	synchronize_rcu();
 
+	on_each_cpu_mask(mm_cpumask(mm), switch_cr3_ipi, &switch_info, 1);
+
 	flush_tlb_mm(mm);
 
 	pgd = mm->pgd;
