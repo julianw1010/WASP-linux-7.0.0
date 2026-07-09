@@ -34,6 +34,7 @@ struct mitosis_stats {
 
 struct mitosis_stats *mitosis_stats_birth(struct mm_struct *mm);
 struct mitosis_stats *mitosis_stats_attach(struct mm_struct *mm, int master_node);
+void mitosis_stats_publish(struct mm_struct *mm);
 void mitosis_stats_retire(struct mm_struct *mm);
 int mitosis_status_open(struct inode *inode, struct file *file);
 int mitosis_history_open(struct inode *inode, struct file *file);

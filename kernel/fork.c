@@ -1204,6 +1204,7 @@ static inline void __mmput(struct mm_struct *mm)
 		module_put(mm->binfmt->module);
 	lru_gen_del_mm(mm);
 	futex_hash_free(mm);
+	mitosis_stats_publish(mm);
 	mmdrop(mm);
 }
 

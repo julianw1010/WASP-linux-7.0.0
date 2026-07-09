@@ -59,6 +59,18 @@ struct mitosis_stats *mitosis_stats_attach(struct mm_struct *mm, int master_node
 	return s;
 }
 
+void mitosis_stats_publish(struct mm_struct *mm)
+{
+	struct mitosis_stats *s = mm->mitosis_stats;
+
+	if (!s || !s->ever_enabled)
+		return;
+
+	spin_lock(&mitosis_stats_lock);
+	list_move_tail(&s->list, &mitosis_hist_list);
+	spin_unlock(&mitosis_stats_lock);
+}
+
 void mitosis_stats_retire(struct mm_struct *mm)
 {
 	struct mitosis_stats *s = mm->mitosis_stats;
