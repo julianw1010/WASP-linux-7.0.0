@@ -1685,6 +1685,9 @@ unsigned long __get_current_cr3_fast(void)
 			  this_cpu_read(cpu_tlbstate.loaded_mm_asid),
 			  tlbstate_lam_cr3_mask());
 
+	pr_emerg("MITOSIS: __get_current_cr3_fast called; it is disabled on this kernel (CR3 may hold a steered replica, not loaded_mm->pgd)\n");
+	BUG();
+
 	/* For now, be very restrictive about when this can be called. */
 	VM_WARN_ON(in_nmi() || preemptible());
 
