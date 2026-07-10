@@ -940,8 +940,11 @@ void switch_mm_irqs_off(struct mm_struct *unused, struct mm_struct *next,
 			if (current_cr3_pa != target_cr3_pa) {
 				if (next->repl_pgd_enabled) {
 					unsigned long new_cr3 = target_cr3_pa | (__read_cr3() & ~PAGE_MASK);
+
+					next_tlb_gen = atomic64_read(&next->context.tlb_gen);
 					native_write_cr3(new_cr3);
 					__flush_tlb_all();
+					this_cpu_write(cpu_tlbstate.ctxs[prev_asid].tlb_gen, next_tlb_gen);
 				}
 				rcu_read_unlock();
 				return;
@@ -952,8 +955,11 @@ void switch_mm_irqs_off(struct mm_struct *unused, struct mm_struct *next,
 
 			if (current_cr3_pa != primary_cr3_pa) {
 				unsigned long new_cr3 = primary_cr3_pa | (__read_cr3() & ~PAGE_MASK);
+
+				next_tlb_gen = atomic64_read(&next->context.tlb_gen);
 				native_write_cr3(new_cr3);
 				__flush_tlb_all();
+				this_cpu_write(cpu_tlbstate.ctxs[prev_asid].tlb_gen, next_tlb_gen);
 				rcu_read_unlock();
 				return;
 			}
