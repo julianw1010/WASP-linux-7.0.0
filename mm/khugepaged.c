@@ -649,7 +649,7 @@ next:
 		 * enough young pte to justify collapsing the page
 		 */
 		if (cc->is_khugepaged &&
-		    (pte_young(pteval) || folio_test_young(folio) ||
+		    (pte_young(mitosis_get_pte(_pte)) || folio_test_young(folio) ||
 		     folio_test_referenced(folio) ||
 		     mmu_notifier_test_young(vma->vm_mm, addr)))
 			referenced++;
@@ -1379,7 +1379,7 @@ static enum scan_result hpage_collapse_scan_pmd(struct mm_struct *mm,
 		 * enough young pte to justify collapsing the page
 		 */
 		if (cc->is_khugepaged &&
-		    (pte_young(pteval) || folio_test_young(folio) ||
+		    (pte_young(mitosis_get_pte(_pte)) || folio_test_young(folio) ||
 		     folio_test_referenced(folio) ||
 		     mmu_notifier_test_young(vma->vm_mm, addr)))
 			referenced++;

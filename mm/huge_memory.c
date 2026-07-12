@@ -2281,7 +2281,7 @@ bool madvise_free_huge_pmd(struct mmu_gather *tlb, struct vm_area_struct *vma,
 	if (!ptl)
 		goto out_unlocked;
 
-	orig_pmd = *pmd;
+	orig_pmd = mitosis_get_pmd(pmd);
 	if (is_huge_zero_pmd(orig_pmd))
 		goto out;
 

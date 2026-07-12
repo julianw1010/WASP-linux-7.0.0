@@ -45,6 +45,8 @@ pmd_t mitosis_pmdp_establish(struct mm_struct *mm, pmd_t *pmdp, pmd_t pmd);
 int mitosis_pmdp_test_and_clear_young(struct vm_area_struct *vma,
 					   unsigned long addr, pmd_t *pmdp);
 
+pmd_t mitosis_get_pmd(pmd_t *pmdp);
+
 extern struct mitosis_cache_head mitosis_cache[NUMA_NODE_COUNT];
 
 bool mitosis_cache_push(struct page *page, int node, int level,
@@ -71,6 +73,7 @@ void mitosis_set_p4d(p4d_t *p4d, p4d_t p4dval);
 void mitosis_set_pud(pud_t *pud, pud_t pudval);
 void mitosis_set_pmd(pmd_t *pmd, pmd_t pmdval);
 void mitosis_set_pte(pte_t *pte, pte_t pteval);
+pte_t mitosis_get_pte(pte_t *ptep);
 
 void mitosis_force_steering_switch(struct mm_struct *mm,
 					nodemask_t *changed_nodes);

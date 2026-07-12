@@ -391,6 +391,51 @@ native_only:
 	native_set_pgd(pgdp, pgdval);
 }
 
+pte_t mitosis_get_pte(pte_t *ptep)
+{
+	struct page *page;
+	struct page *cur_page;
+	struct page *start_page;
+	unsigned long offset;
+	pte_t val;
+
+	if (!ptep)
+		return __pte(0);
+
+	if (!static_branch_unlikely(&mitosis_repl_ever_enabled))
+		return *ptep;
+
+	if (!virt_addr_valid(ptep))
+		return *ptep;
+
+	page = virt_to_page(ptep);
+
+	if (!page || !pfn_valid(page_to_pfn(page)) ||
+	    !page->pt_replica)
+		return *ptep;
+
+	val = __pte(0);
+	offset = ((unsigned long)ptep) & ~PAGE_MASK;
+	start_page = page;
+	cur_page = page;
+
+	do {
+		pte_t entry_val =
+			*(pte_t *)(page_address(cur_page) + offset);
+
+		if (cur_page == start_page) {
+			val = entry_val;
+			if (!(pte_val(entry_val) & _PAGE_PRESENT))
+				break;
+		} else if (pte_val(entry_val) & _PAGE_PRESENT) {
+			val = __pte(pte_val(val) |
+				    (pte_val(entry_val) & PTE_FLAGS_MASK));
+		}
+		cur_page = cur_page->pt_replica;
+	} while (cur_page && cur_page != start_page);
+	return val;
+}
+
 pte_t mitosis_ptep_get_and_clear(struct mm_struct *mm, pte_t *ptep)
 {
 	struct page *page;
@@ -761,4 +806,49 @@ native_only:
 		young = test_and_clear_bit(_PAGE_BIT_ACCESSED,
 					   (unsigned long *)pmdp);
 	return young;
+}
+
+pmd_t mitosis_get_pmd(pmd_t *pmdp)
+{
+	struct page *page;
+	struct page *cur_page;
+	struct page *start_page;
+	unsigned long offset;
+	pmd_t val;
+
+	if (!pmdp)
+		return __pmd(0);
+
+	if (!static_branch_unlikely(&mitosis_repl_ever_enabled))
+		return *pmdp;
+
+	if (!virt_addr_valid(pmdp))
+		return *pmdp;
+
+	page = virt_to_page(pmdp);
+
+	if (!page || !pfn_valid(page_to_pfn(page)) ||
+	    !page->pt_replica)
+		return *pmdp;
+
+	val = __pmd(0);
+	offset = ((unsigned long)pmdp) & ~PAGE_MASK;
+	start_page = page;
+	cur_page = page;
+
+	do {
+		pmd_t entry_val =
+			*(pmd_t *)(page_address(cur_page) + offset);
+
+		if (cur_page == start_page) {
+			val = entry_val;
+			if (!(pmd_val(entry_val) & _PAGE_PRESENT))
+				break;
+		} else if (pmd_val(entry_val) & _PAGE_PRESENT) {
+			val = __pmd(pmd_val(val) |
+				    (pmd_val(entry_val) & PTE_FLAGS_MASK));
+		}
+		cur_page = cur_page->pt_replica;
+	} while (cur_page && cur_page != start_page);
+	return val;
 }
