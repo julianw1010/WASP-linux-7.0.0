@@ -1219,11 +1219,11 @@ void mmput(struct mm_struct *mm)
 		bool repl = mm->repl_pgd_enabled;
 
 		if (repl) {
-			WARN_ON_ONCE(atomic_read(&mm->mm_users) != 0);
+			BUG_ON(atomic_read(&mm->mm_users) != 0);
 			synchronize_rcu();
 			mitosis_disable(mm);
-			WARN_ON_ONCE(mm->repl_pgd_enabled);
-			WARN_ON_ONCE(!nodes_empty(mm->repl_pgd_nodes));
+			BUG_ON(mm->repl_pgd_enabled);
+			BUG_ON(!nodes_empty(mm->repl_pgd_nodes));
 		}
 		__mmput(mm);
 	}
@@ -2343,6 +2343,9 @@ __latent_entropy struct task_struct *copy_process(
 		p->group_leader = p;
 		p->tgid = p->pid;
 	}
+
+	if (p->mm && !(clone_flags & CLONE_VM) && p->mm->repl_pgd_enabled)
+		mitosis_stats_stamp(p->mm, p);
 
 	p->nr_dirtied = 0;
 	p->nr_dirtied_pause = 128 >> (PAGE_SHIFT - 10);

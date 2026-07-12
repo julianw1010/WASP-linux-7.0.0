@@ -59,6 +59,17 @@ struct mitosis_stats *mitosis_stats_attach(struct mm_struct *mm, int master_node
 	return s;
 }
 
+void mitosis_stats_stamp(struct mm_struct *mm, struct task_struct *tsk)
+{
+	struct mitosis_stats *s = mm->mitosis_stats;
+
+	if (!s || !s->ever_enabled)
+		return;
+
+	s->pid = task_pid_nr(tsk);
+	get_task_comm(s->comm, tsk);
+}
+
 void mitosis_stats_publish(struct mm_struct *mm)
 {
 	struct mitosis_stats *s = mm->mitosis_stats;
