@@ -823,7 +823,7 @@ void switch_mm_irqs_off(struct mm_struct *unused, struct mm_struct *next,
 		int steered_node;
 
 		steered_node = READ_ONCE(next->repl_steering[local_node]);
-		if (steered_node >= 0 && steered_node < MAX_NUMNODES)
+		if (steered_node >= 0 && steered_node < NUMA_NODE_COUNT)
 			target_node = steered_node;
 		else
 			target_node = local_node;
