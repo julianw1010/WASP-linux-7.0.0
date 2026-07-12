@@ -169,8 +169,7 @@ static void replicate_existing_pagetables_phase1(struct mm_struct *mm)
 }
 
 static struct page *find_local_replica_for_rewrite(unsigned long entry_val,
-						   int node,
-						   struct page **orig_page_out)
+						   int node)
 {
 	unsigned long child_phys;
 	struct page *child_page, *local_child;
@@ -187,8 +186,6 @@ static struct page *find_local_replica_for_rewrite(unsigned long entry_val,
 	if (!local_child || page_to_nid(local_child) != node)
 		return NULL;
 
-	if (orig_page_out)
-		*orig_page_out = child_page;
 	return local_child;
 }
 
@@ -197,14 +194,12 @@ static void replicate_existing_pagetables_phase2(struct mm_struct *mm)
 	pgd_t *pgd;
 	struct page *pgd_page;
 	int node;
-	int primary_node;
 
 	if (!mm)
 		return;
 
 	pgd = mm->pgd;
 	pgd_page = virt_to_page(pgd);
-	primary_node = page_to_nid(pgd_page);
 
 	if (!pgd_page->pt_replica)
 		return;
@@ -234,7 +229,7 @@ static void replicate_existing_pagetables_phase2(struct mm_struct *mm)
 				continue;
 
 			local_child = find_local_replica_for_rewrite(
-				pgd_val(pgdval), node, NULL);
+				pgd_val(pgdval), node);
 			if (local_child) {
 				unsigned long new_phys = __pa(page_address(local_child));
 				pgdval_t new_val = new_phys | (pgd_val(pgdval) & ~PTE_PFN_MASK);
@@ -264,7 +259,7 @@ static void replicate_existing_pagetables_phase2(struct mm_struct *mm)
 					continue;
 
 				local_child = find_local_replica_for_rewrite(
-					p4d_val(p4dval), node, NULL);
+					p4d_val(p4dval), node);
 				if (local_child) {
 					unsigned long new_phys = __pa(page_address(local_child));
 					p4dval_t new_val = new_phys | (p4d_val(p4dval) & ~PTE_PFN_MASK);
@@ -283,21 +278,13 @@ static void replicate_existing_pagetables_phase2(struct mm_struct *mm)
 					if (pud_none(pudval) || !pud_present(pudval) || pud_trans_huge(pudval))
 						continue;
 
-					{
-						struct page *orig_page = NULL;
+					local_child = find_local_replica_for_rewrite(
+						pud_val(pudval), node);
+					if (local_child) {
+						unsigned long new_phys = __pa(page_address(local_child));
+						pudval_t new_val = new_phys | (pud_val(pudval) & ~PTE_PFN_MASK);
 
-						local_child = find_local_replica_for_rewrite(
-							pud_val(pudval), node, &orig_page);
-						if (local_child) {
-							unsigned long new_phys = __pa(page_address(local_child));
-							pudval_t new_val = new_phys | (pud_val(pudval) & ~PTE_PFN_MASK);
-
-							if (READ_ONCE(mitosis_verify))
-								BUG_ON(node == primary_node &&
-								       local_child != orig_page);
-
-							WRITE_ONCE(node_pud_base[pud_idx], __pud(new_val));
-						}
+						WRITE_ONCE(node_pud_base[pud_idx], __pud(new_val));
 					}
 
 					node_pmd_base = pmd_offset(&node_pud_base[pud_idx], 0);
@@ -310,7 +297,7 @@ static void replicate_existing_pagetables_phase2(struct mm_struct *mm)
 							continue;
 
 						local_child = find_local_replica_for_rewrite(
-							pmd_val(pmdval), node, NULL);
+							pmd_val(pmdval), node);
 						if (local_child) {
 							unsigned long new_phys = __pa(page_address(local_child));
 							pmdval_t new_val = new_phys | (pmd_val(pmdval) & ~PTE_PFN_MASK);
@@ -606,8 +593,6 @@ void mitosis_disable(struct mm_struct *mm)
 		replica_pgd = mm->pgd_replicas[node];
 		if (!replica_pgd)
 			continue;
-
-		mitosis_replica_free_inc(MITOSIS_CACHE_PGD);
 
 		replica_page = virt_to_page(replica_pgd);
 		from_cache = PageMitosisFromCache(replica_page);

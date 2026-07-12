@@ -13,7 +13,6 @@
 
 struct ctl_table;
 struct vm_area_struct;
-struct seq_file;
 struct mmu_gather;
 
 DECLARE_STATIC_KEY_FALSE(mitosis_repl_ever_enabled);
@@ -170,10 +169,4 @@ int mitosis_free_replica_chain(struct page *primary, int level, int order,
 
 void mitosis_pt_account_mm(struct mm_struct *mm, int node, int level, int delta);
 void mitosis_pt_account_page(struct page *page, int level, int delta);
-
-extern int mitosis_verify;
-void mitosis_verify_fault_addr(struct mm_struct *mm, unsigned long address);
-
-int mitosis_audit_run(pid_t pid);
-void mitosis_audit_seq_show(struct seq_file *m);
 #endif

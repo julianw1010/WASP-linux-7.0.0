@@ -191,48 +191,6 @@ static const struct proc_ops mitosis_inherit_ops = {
 	.proc_release	= single_release,
 };
 
-static int mitosis_verify_show(struct seq_file *m, void *v)
-{
-	seq_printf(m, "%d\n", READ_ONCE(mitosis_verify));
-	return 0;
-}
-
-static int mitosis_verify_open(struct inode *inode, struct file *file)
-{
-	return single_open(file, mitosis_verify_show, NULL);
-}
-
-static ssize_t mitosis_verify_write(struct file *file, const char __user *ubuf,
-				    size_t count, loff_t *ppos)
-{
-	char buf[32];
-	size_t len;
-	long val;
-
-	len = min(count, sizeof(buf) - 1);
-	if (copy_from_user(buf, ubuf, len))
-		return -EFAULT;
-	buf[len] = '\0';
-
-	if (kstrtol(buf, 10, &val))
-		return -EINVAL;
-
-	WRITE_ONCE(mitosis_verify, val ? 1 : 0);
-
-	pr_info("MITOSIS: verify %s\n",
-		READ_ONCE(mitosis_verify) ? "enabled" : "disabled");
-
-	return count;
-}
-
-static const struct proc_ops mitosis_verify_ops = {
-	.proc_open	= mitosis_verify_open,
-	.proc_read	= seq_read,
-	.proc_write	= mitosis_verify_write,
-	.proc_lseek	= seq_lseek,
-	.proc_release	= single_release,
-};
-
 static const struct proc_ops mitosis_status_ops = {
 	.proc_open	= mitosis_status_open,
 	.proc_read	= seq_read,
@@ -247,95 +205,6 @@ static const struct proc_ops mitosis_history_ops = {
 	.proc_release	= seq_release,
 };
 
-static int mitosis_balance_show(struct seq_file *m, void *v)
-{
-	static const char * const lvl[MITOSIS_PT_NR_LEVELS] = {
-		[MITOSIS_CACHE_PTE] = "PTE",
-		[MITOSIS_CACHE_PMD] = "PMD",
-		[MITOSIS_CACHE_PUD] = "PUD",
-		[MITOSIS_CACHE_P4D] = "P4D",
-		[MITOSIS_CACHE_PGD] = "PGD",
-	};
-	long total_alloc = 0, total_free = 0;
-	int level;
-
-	seq_puts(m, " Mitosis replica-page balance  (excess copies only; primary NOT counted)\n");
-	seq_puts(m, " rows = page-table level,  cols = cumulative count since boot\n");
-	seq_puts(m, " LIVE = ALLOCS - FREES;  must read 0 when no replicated process is alive\n");
-	seq_puts(m, " -----------------------------------------------------------------------\n");
-	seq_printf(m, " %-6s %15s %15s %15s\n", "level", "allocs", "frees", "live");
-
-	for (level = MITOSIS_CACHE_PTE; level <= MITOSIS_CACHE_PGD; level++) {
-		long a = atomic_long_read(&mitosis_replica_allocs[level]);
-		long f = atomic_long_read(&mitosis_replica_frees[level]);
-
-		total_alloc += a;
-		total_free += f;
-		seq_printf(m, " %-6s %15ld %15ld %15ld\n", lvl[level], a, f, a - f);
-	}
-
-	seq_puts(m, " -----------------------------------------------------------------------\n");
-	seq_printf(m, " %-6s %15ld %15ld %15ld\n", "TOTAL",
-		   total_alloc, total_free, total_alloc - total_free);
-	return 0;
-}
-
-static int mitosis_balance_open(struct inode *inode, struct file *file)
-{
-	return single_open(file, mitosis_balance_show, NULL);
-}
-
-static const struct proc_ops mitosis_balance_ops = {
-	.proc_open	= mitosis_balance_open,
-	.proc_read	= seq_read,
-	.proc_lseek	= seq_lseek,
-	.proc_release	= single_release,
-};
-
-static int mitosis_audit_show(struct seq_file *m, void *v)
-{
-	mitosis_audit_seq_show(m);
-	return 0;
-}
-
-static int mitosis_audit_open(struct inode *inode, struct file *file)
-{
-	return single_open(file, mitosis_audit_show, NULL);
-}
-
-static ssize_t mitosis_audit_write(struct file *file, const char __user *ubuf,
-				   size_t count, loff_t *ppos)
-{
-	char buf[32];
-	size_t len;
-	long pid;
-	int ret;
-
-	len = min(count, sizeof(buf) - 1);
-	if (copy_from_user(buf, ubuf, len))
-		return -EFAULT;
-	buf[len] = '\0';
-
-	if (kstrtol(buf, 10, &pid))
-		return -EINVAL;
-	if (pid < 0)
-		return -EINVAL;
-
-	ret = mitosis_audit_run((pid_t)pid);
-	if (ret)
-		return ret;
-
-	return count;
-}
-
-static const struct proc_ops mitosis_audit_ops = {
-	.proc_open	= mitosis_audit_open,
-	.proc_read	= seq_read,
-	.proc_write	= mitosis_audit_write,
-	.proc_lseek	= seq_lseek,
-	.proc_release	= single_release,
-};
-
 static int __init mitosis_proc_init(void)
 {
 	mitosis_dir = proc_mkdir("mitosis", NULL);
@@ -348,19 +217,10 @@ static int __init mitosis_proc_init(void)
 	if (!proc_create("inherit", 0644, mitosis_dir, &mitosis_inherit_ops))
 		goto fail;
 
-	if (!proc_create("verify", 0644, mitosis_dir, &mitosis_verify_ops))
-		goto fail;
-
 	if (!proc_create("status", 0444, mitosis_dir, &mitosis_status_ops))
 		goto fail;
 
 	if (!proc_create("history", 0444, mitosis_dir, &mitosis_history_ops))
-		goto fail;
-
-	if (!proc_create("balance", 0444, mitosis_dir, &mitosis_balance_ops))
-		goto fail;
-
-	if (!proc_create("audit", 0644, mitosis_dir, &mitosis_audit_ops))
 		goto fail;
 	return 0;
 

@@ -8,8 +8,6 @@
 
 DEFINE_STATIC_KEY_FALSE(mitosis_repl_ever_enabled);
 
-#define MITOSIS_VERIFY_AD (_PAGE_ACCESSED | _PAGE_DIRTY | _PAGE_SAVED_DIRTY)
-
 void mitosis_set_pte(pte_t *ptep, pte_t pteval)
 {
 	struct page *pte_page;
@@ -42,23 +40,6 @@ void mitosis_set_pte(pte_t *ptep, pte_t pteval)
 		WRITE_ONCE(*replica_entry, pteval);
 		cur_page = cur_page->pt_replica;
 	} while (cur_page && cur_page != start_page);
-
-	if (unlikely(READ_ONCE(mitosis_verify))) {
-		cur_page = start_page;
-		do {
-			pte_t *replica_entry = (pte_t *)(page_address(cur_page) + offset);
-
-			if ((pte_val(READ_ONCE(*replica_entry)) & ~MITOSIS_VERIFY_AD) !=
-			    (pte_val(pteval) & ~MITOSIS_VERIFY_AD)) {
-				pr_emerg("MITOSIS verify: set_pte replica on node %d diverged (%lx != %lx)\n",
-					 page_to_nid(cur_page),
-					 (unsigned long)pte_val(READ_ONCE(*replica_entry)),
-					 (unsigned long)pte_val(pteval));
-				BUG();
-			}
-			cur_page = cur_page->pt_replica;
-		} while (cur_page && cur_page != start_page);
-	}
 	return;
 
 native_only:
@@ -75,7 +56,6 @@ void mitosis_set_pmd(pmd_t *pmdp, pmd_t pmdval)
 	unsigned long entry_val;
 	const unsigned long pfn_mask = PTE_PFN_MASK;
 	bool has_child;
-	bool is_huge;
 
 	if (!static_branch_unlikely(&mitosis_repl_ever_enabled))
 		goto native_only;
@@ -98,9 +78,6 @@ void mitosis_set_pmd(pmd_t *pmdp, pmd_t pmdval)
 		    !pmd_trans_huge(pmdval) &&
 		    !pmd_leaf(pmdval) &&
 		    entry_val != 0;
-
-	is_huge = pmd_present(pmdval) &&
-		  (pmd_trans_huge(pmdval) || pmd_leaf(pmdval));
 
 	if (has_child) {
 		unsigned long child_phys = entry_val & pfn_mask;
@@ -132,23 +109,6 @@ void mitosis_set_pmd(pmd_t *pmdp, pmd_t pmdval)
 
 		cur_page = cur_page->pt_replica;
 	} while (cur_page && cur_page != start_page);
-
-	if (unlikely(READ_ONCE(mitosis_verify)) && is_huge) {
-		cur_page = start_page;
-		do {
-			pmd_t *replica_entry = (pmd_t *)(page_address(cur_page) + offset);
-
-			if ((pmd_val(READ_ONCE(*replica_entry)) & ~MITOSIS_VERIFY_AD) !=
-			    (pmd_val(pmdval) & ~MITOSIS_VERIFY_AD)) {
-				pr_emerg("MITOSIS verify: set_pmd huge replica on node %d diverged (%lx != %lx)\n",
-					 page_to_nid(cur_page),
-					 (unsigned long)pmd_val(READ_ONCE(*replica_entry)),
-					 (unsigned long)pmd_val(pmdval));
-				BUG();
-			}
-			cur_page = cur_page->pt_replica;
-		} while (cur_page && cur_page != start_page);
-	}
 	return;
 
 native_only:
