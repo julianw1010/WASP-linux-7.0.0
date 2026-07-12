@@ -344,15 +344,15 @@ int mitosis_enable(struct mm_struct *mm)
 
 	static_branch_enable(&mitosis_repl_ever_enabled);
 
-	for (i = 0; i < NUMA_NODE_COUNT; i++)
-		mm->repl_steering[i] = -1;
-
 	mutex_lock(&mm->repl_mutex);
 
 	if (mm->repl_pgd_enabled) {
 		ret = 0;
 		goto out_unlock;
 	}
+
+	for (i = 0; i < NUMA_NODE_COUNT; i++)
+		mm->repl_steering[i] = -1;
 
 	base_pgd = mm->pgd;
 	base_page = virt_to_page(base_pgd);
@@ -367,6 +367,7 @@ int mitosis_enable(struct mm_struct *mm)
 	base_page->pt_replica = NULL;
 
 	ret = mitosis_alloc_pgd_replicas(base_page, mm, pgd_pages, &count);
+	BUG_ON(ret || count < 2);
 
 	for (i = 1; i < count; i++) {
 		pgd_t *dst_pgd = page_address(pgd_pages[i]);
