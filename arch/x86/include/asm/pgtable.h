@@ -1259,8 +1259,8 @@ static inline pte_t ptep_get_and_clear(struct mm_struct *mm, unsigned long addr,
 
 #define __HAVE_ARCH_PTEP_GET_AND_CLEAR_FULL
 static inline pte_t ptep_get_and_clear_full(struct mm_struct *mm,
-                                            unsigned long addr, pte_t *ptep,
-                                            int full)
+					    unsigned long addr, pte_t *ptep,
+					    int full)
 {
 	pte_t pte;
 	pte = mitosis_ptep_get_and_clear(mm, ptep);

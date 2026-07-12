@@ -50,8 +50,7 @@ void ___pmd_free_tlb(struct mmu_gather *tlb, pmd_t *pmd)
 	paravirt_release_pmd(__pa(pmd) >> PAGE_SHIFT);
 	/*
 	 * NOTE! For PAE, any changes to the top page-directory-pointer-table
-	 * entries on the kernel page-table-directory are not automatically
-	 * propagated to the per-process ones, we must do that by hand.
+	 * entries need a full cr3 reload to flush.
 	 */
 #ifdef CONFIG_X86_PAE
 	tlb->need_flush_all = 1;
@@ -521,7 +520,7 @@ int pudp_set_access_flags(struct vm_area_struct *vma, unsigned long address,
 int ptep_test_and_clear_young(struct vm_area_struct *vma,
 			      unsigned long addr, pte_t *ptep)
 {
-        return mitosis_ptep_test_and_clear_young(vma, addr, ptep);
+	return mitosis_ptep_test_and_clear_young(vma, addr, ptep);
 }
 
 #if defined(CONFIG_TRANSPARENT_HUGEPAGE) || defined(CONFIG_ARCH_HAS_NONLEAF_PMD_YOUNG)
