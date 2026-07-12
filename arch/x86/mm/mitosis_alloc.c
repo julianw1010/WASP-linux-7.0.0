@@ -55,7 +55,7 @@ int mitosis_alloc_pte_replicas(struct page *base_page, struct mm_struct *mm,
 			BUG_ON(!new_page);
 		}
 
-		pagetable_pte_ctor(mm, page_ptdesc(new_page));
+		BUG_ON(!pagetable_pte_ctor(mm, page_ptdesc(new_page)));
 
 		new_page->pt_owner_mm = mm;
 		mm_inc_nr_ptes(mm);
@@ -114,7 +114,7 @@ int mitosis_alloc_pmd_replicas(struct page *base_page, struct mm_struct *mm,
 			BUG_ON(!new_page);
 		}
 
-		pagetable_pmd_ctor(mm, page_ptdesc(new_page));
+		BUG_ON(!pagetable_pmd_ctor(mm, page_ptdesc(new_page)));
 
 		new_page->pt_owner_mm = mm;
 		mm_inc_nr_pmds(mm);
