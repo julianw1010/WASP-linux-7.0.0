@@ -1108,7 +1108,7 @@ static void update_and_decide(void) {
         p->prev_dtlb_store_walks_rd  = dsw_rd;
         p->last_sample_time = now;
 
-        p->last_mar = (double)d_mem * 1000.0 / elapsed_ms;
+        p->last_mar = (double)(d_mem + d_mem_st) * 1000.0 / elapsed_ms;
 
         {
             long long load_walks  = (d_walk > 0) ? d_walk : d_walk_comp;
