@@ -451,6 +451,9 @@ static void consider_global_asid(struct mm_struct *mm)
 	if (!cpu_feature_enabled(X86_FEATURE_INVLPGB))
 		return;
 
+	if (mm->repl_pgd_enabled && !sysctl_mitosis_invlpgb)
+		return;
+
 	/* Check every once in a while. */
 	if ((current->pid & 0x1f) != (jiffies & 0x1f))
 		return;
@@ -1951,3 +1954,5 @@ static int __init create_tlb_single_page_flush_ceiling(void)
 	return 0;
 }
 late_initcall(create_tlb_single_page_flush_ceiling);
+
+int sysctl_mitosis_invlpgb __read_mostly = 1;

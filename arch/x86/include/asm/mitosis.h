@@ -65,6 +65,8 @@ void mitosis_cache_count_return(struct mm_struct *owner_mm, int node);
 
 extern int sysctl_mitosis_inherit;
 
+extern int sysctl_mitosis_invlpgb;
+
 int mitosis_enable(struct mm_struct *mm);
 void mitosis_disable(struct mm_struct *mm);
 void mitosis_set_pgd(pgd_t *pgd, pgd_t pgdval);

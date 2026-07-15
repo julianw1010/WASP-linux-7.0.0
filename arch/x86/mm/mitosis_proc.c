@@ -191,6 +191,51 @@ static const struct proc_ops mitosis_inherit_ops = {
 	.proc_release	= single_release,
 };
 
+static int mitosis_invlpgb_show(struct seq_file *m, void *v)
+{
+	seq_printf(m, "%d\n", sysctl_mitosis_invlpgb);
+	return 0;
+}
+
+static int mitosis_invlpgb_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, mitosis_invlpgb_show, NULL);
+}
+
+static ssize_t mitosis_invlpgb_write(struct file *file, const char __user *ubuf,
+				     size_t count, loff_t *ppos)
+{
+	char buf[32];
+	size_t len;
+	long val;
+
+	len = min(count, sizeof(buf) - 1);
+	if (copy_from_user(buf, ubuf, len))
+		return -EFAULT;
+	buf[len] = '\0';
+
+	if (kstrtol(buf, 10, &val))
+		return -EINVAL;
+
+	if (val < 0 || val > 1)
+		return -EINVAL;
+
+	sysctl_mitosis_invlpgb = (int)val;
+
+	pr_info("MITOSIS: INVLPGB global ASIDs for replicated mms %s\n",
+		sysctl_mitosis_invlpgb ? "enabled" : "disabled");
+
+	return count;
+}
+
+static const struct proc_ops mitosis_invlpgb_ops = {
+	.proc_open	= mitosis_invlpgb_open,
+	.proc_read	= seq_read,
+	.proc_write	= mitosis_invlpgb_write,
+	.proc_lseek	= seq_lseek,
+	.proc_release	= single_release,
+};
+
 static const struct proc_ops mitosis_status_ops = {
 	.proc_open	= mitosis_status_open,
 	.proc_read	= seq_read,
@@ -215,6 +260,9 @@ static int __init mitosis_proc_init(void)
 		goto fail;
 
 	if (!proc_create("inherit", 0644, mitosis_dir, &mitosis_inherit_ops))
+		goto fail;
+
+	if (!proc_create("invlpgb", 0644, mitosis_dir, &mitosis_invlpgb_ops))
 		goto fail;
 
 	if (!proc_create("status", 0444, mitosis_dir, &mitosis_status_ops))
