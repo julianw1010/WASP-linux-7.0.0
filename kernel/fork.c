@@ -1119,7 +1119,6 @@ static struct mm_struct *mm_init(struct mm_struct *mm, struct task_struct *p,
 
 	mm->repl_pgd_enabled = false;
 	mm->repl_pending_enable = false;
-	mm->cache_only_mode = false;
 	mm->mitosis_stats = NULL;
 	nodes_clear(mm->repl_pgd_nodes);
 	mutex_init(&mm->repl_mutex);
@@ -1548,7 +1547,6 @@ static struct mm_struct *dup_mm(struct task_struct *tsk,
 {
 	struct mm_struct *mm;
 	int err;
-	bool saved_cache_only_mode = oldmm->cache_only_mode;
 
 	mm = allocate_mm();
 	if (!mm)
@@ -1558,8 +1556,6 @@ static struct mm_struct *dup_mm(struct task_struct *tsk,
 
 	if (!mm_init(mm, tsk, mm->user_ns))
 		goto fail_nomem;
-
-	mm->cache_only_mode = saved_cache_only_mode;
 
 	uprobe_start_dup_mmap();
 	err = dup_mmap(mm, oldmm);

@@ -19,7 +19,7 @@ struct mitosis_cache_head mitosis_cache[NUMA_NODE_COUNT] = {
 
 static bool mitosis_cache_counted(struct mm_struct *owner_mm)
 {
-	return owner_mm && (owner_mm->repl_pgd_enabled || owner_mm->cache_only_mode);
+	return owner_mm && owner_mm->repl_pgd_enabled;
 }
 
 bool mitosis_cache_push(struct page *page, int node, int level,

@@ -3041,48 +3041,6 @@ SYSCALL_DEFINE5(prctl, int, option, unsigned long, arg2, unsigned long, arg3,
 		mitosis_prctl_put_target_mm(mm, task, target_pid);
 		break;
 	}
-	case PR_SET_PGTABLE_CACHE_ONLY:
-	{
-		struct mm_struct *mm;
-		struct task_struct *task;
-		pid_t target_pid = (pid_t)arg3;
-		bool enable = (arg2 != 0);
-
-		mm = mitosis_prctl_get_target_mm(target_pid, &task);
-		if (IS_ERR(mm)) {
-			error = PTR_ERR(mm);
-			break;
-		}
-
-		if (enable && mm->repl_pgd_enabled) {
-			error = -EBUSY;
-			mitosis_prctl_put_target_mm(mm, task, target_pid);
-			break;
-		}
-
-		WRITE_ONCE(mm->cache_only_mode, enable);
-		error = 0;
-
-		mitosis_prctl_put_target_mm(mm, task, target_pid);
-		break;
-	}
-	case PR_GET_PGTABLE_CACHE_ONLY:
-	{
-		struct mm_struct *mm;
-		struct task_struct *task;
-		pid_t target_pid = (pid_t)arg2;
-
-		mm = mitosis_prctl_get_target_mm(target_pid, &task);
-		if (IS_ERR(mm)) {
-			error = PTR_ERR(mm);
-			break;
-		}
-
-		error = READ_ONCE(mm->cache_only_mode) ? 1 : 0;
-
-		mitosis_prctl_put_target_mm(mm, task, target_pid);
-		break;
-	}
 	case PR_SET_PGTABLE_REPL_STEERING:
 	{
 		struct mm_struct *mm;

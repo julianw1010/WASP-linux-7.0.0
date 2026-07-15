@@ -78,7 +78,9 @@ static inline pgtable_t __pte_alloc_one_noprof(struct mm_struct *mm, gfp_t gfp,
 	struct ptdesc *ptdesc;
 	struct page *page;
 
-	page = mitosis_cache_pop(node, MITOSIS_CACHE_PTE, mm);
+	page = NULL;
+	if (mm->repl_pgd_enabled)
+		page = mitosis_cache_pop(node, MITOSIS_CACHE_PTE, mm);
 	if (!page)
 		page = alloc_pages_node(node, gfp | __GFP_THISNODE, 0);
 	BUG_ON(!page);
@@ -182,7 +184,9 @@ static inline pmd_t *pmd_alloc_one_noprof(struct mm_struct *mm, unsigned long ad
 	}
 
 	node = page_to_nid(virt_to_page(pud));
-	page = mitosis_cache_pop(node, MITOSIS_CACHE_PMD, mm);
+	page = NULL;
+	if (mm->repl_pgd_enabled)
+		page = mitosis_cache_pop(node, MITOSIS_CACHE_PMD, mm);
 	if (!page)
 		page = alloc_pages_node(node, gfp | __GFP_THISNODE, 0);
 	BUG_ON(!page);
@@ -227,7 +231,9 @@ static inline pud_t *__pud_alloc_one_noprof(struct mm_struct *mm, unsigned long 
 	}
 
 	node = page_to_nid(virt_to_page(p4d));
-	page = mitosis_cache_pop(node, MITOSIS_CACHE_PUD, mm);
+	page = NULL;
+	if (mm->repl_pgd_enabled)
+		page = mitosis_cache_pop(node, MITOSIS_CACHE_PUD, mm);
 	if (!page)
 		page = alloc_pages_node(node, gfp | __GFP_ZERO | __GFP_THISNODE, 0);
 	if (!page)
@@ -294,7 +300,9 @@ static inline p4d_t *__p4d_alloc_one_noprof(struct mm_struct *mm, unsigned long 
 	}
 
 	node = page_to_nid(virt_to_page(pgd));
-	page = mitosis_cache_pop(node, MITOSIS_CACHE_P4D, mm);
+	page = NULL;
+	if (mm->repl_pgd_enabled)
+		page = mitosis_cache_pop(node, MITOSIS_CACHE_P4D, mm);
 	if (!page)
 		page = alloc_pages_node(node, gfp | __GFP_ZERO | __GFP_THISNODE, 0);
 	if (!page)
