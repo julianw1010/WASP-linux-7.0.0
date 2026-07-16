@@ -222,7 +222,7 @@ static ssize_t mitosis_invlpgb_write(struct file *file, const char __user *ubuf,
 
 	sysctl_mitosis_invlpgb = (int)val;
 
-	pr_info("MITOSIS: INVLPGB global ASIDs for replicated mms %s\n",
+	pr_info("MITOSIS: INVLPGB global ASIDs for all mms %s\n",
 		sysctl_mitosis_invlpgb ? "enabled" : "disabled");
 
 	return count;
