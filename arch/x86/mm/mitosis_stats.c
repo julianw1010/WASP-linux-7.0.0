@@ -8,6 +8,7 @@
 #include <asm/pgtable.h>
 #include <asm/pgalloc.h>
 #include <asm/mitosis.h>
+#include <linux/jiffies.h>
 #include <linux/mitosis_stats.h>
 
 static LIST_HEAD(mitosis_live_list);
@@ -26,6 +27,7 @@ struct mitosis_stats *mitosis_stats_birth(struct mm_struct *mm)
 	INIT_LIST_HEAD(&s->list);
 	s->mm = mm;
 	s->master_node = NUMA_NO_NODE;
+	s->start_jiffies = jiffies;
 
 	mm->mitosis_stats = s;
 	return s;
@@ -73,6 +75,8 @@ void mitosis_stats_publish(struct mm_struct *mm)
 
 	if (!s || !s->ever_enabled)
 		return;
+
+	s->end_jiffies = jiffies;
 
 	spin_lock(&mitosis_stats_lock);
 	list_move_tail(&s->list, &mitosis_hist_list);
@@ -126,6 +130,59 @@ static void mitosis_bump_max(atomic_long_t *maxp, long cur)
 	}
 }
 
+void mitosis_stats_fault(struct mm_struct *mm, unsigned int flags)
+{
+	struct mitosis_stats *s;
+	int node;
+
+	if (!mm)
+		return;
+
+	s = mm->mitosis_stats;
+	if (!s)
+		return;
+
+	atomic_long_inc(&s->faults);
+	if (flags & FAULT_FLAG_WRITE)
+		atomic_long_inc(&s->faults_write);
+	if (flags & FAULT_FLAG_PROT)
+		atomic_long_inc(&s->faults_present);
+
+	node = numa_node_id();
+	if (node >= 0 && node < NUMA_NODE_COUNT)
+		atomic_long_inc(&s->faults_node[node]);
+}
+
+static bool mitosis_stats_ready __read_mostly;
+
+void mitosis_stats_pt_write(void *tablep, int level)
+{
+	struct mm_struct *mm;
+	struct mitosis_stats *s;
+
+	if (!READ_ONCE(mitosis_stats_ready))
+		return;
+	if (level < 0 || level >= MITOSIS_PT_NR_LEVELS)
+		return;
+	if (!virt_addr_valid(tablep))
+		return;
+
+	mm = READ_ONCE(virt_to_page(tablep)->pt_owner_mm);
+	if (!mm)
+		return;
+
+	s = mm->mitosis_stats;
+	if (s)
+		atomic_long_inc(&s->pt_writes[level]);
+}
+
+static int __init mitosis_stats_init(void)
+{
+	WRITE_ONCE(mitosis_stats_ready, true);
+	return 0;
+}
+early_initcall(mitosis_stats_init);
+
 void mitosis_pt_account_mm(struct mm_struct *mm, int node, int level, int delta)
 {
 	struct mitosis_stats *s;
@@ -177,6 +234,16 @@ static void mitosis_print_section(struct seq_file *m, const char *name)
 static void mitosis_print_kv(struct seq_file *m, const char *label, long val)
 {
 	seq_printf(m, "    %-40s %12ld\n", label, val);
+}
+
+static void mitosis_print_group(struct seq_file *m, const char *name)
+{
+	seq_printf(m, "      %s:\n", name);
+}
+
+static void mitosis_print_sub2(struct seq_file *m, const char *label, long val)
+{
+	seq_printf(m, "        %-36s %12ld\n", label, val);
 }
 
 static void mitosis_print_node_header(struct seq_file *m)
@@ -236,6 +303,14 @@ static void mitosis_stats_print(struct seq_file *m, struct mitosis_stats *s,
 	seq_printf(m, "    %-40s %px\n", "mm", s->mm);
 	seq_printf(m, "    %-40s %d\n", "master node", s->master_node);
 
+	{
+		unsigned long endj = history ? s->end_jiffies : jiffies;
+		unsigned int ms = jiffies_to_msecs(endj - s->start_jiffies);
+
+		seq_printf(m, "    %-40s %u.%03u\n", "lifetime (s)",
+			   ms / 1000, ms % 1000);
+	}
+
 	mitosis_print_section(m, "THP / page-table events");
 	mitosis_print_kv(m, "THP splits", atomic_long_read(&s->thp_split));
 	mitosis_print_kv(m, "THP collapses", atomic_long_read(&s->thp_collapse));
@@ -243,6 +318,43 @@ static void mitosis_stats_print(struct seq_file *m, struct mitosis_stats *s,
 			 atomic_long_read(&s->deposits));
 	mitosis_print_kv(m, "THP pgtable withdrawals",
 			 atomic_long_read(&s->withdrawals));
+
+	{
+		long f = atomic_long_read(&s->faults);
+		long fw = atomic_long_read(&s->faults_write);
+		long fp = atomic_long_read(&s->faults_present);
+		int node;
+
+		mitosis_print_section(m, "Page faults");
+		seq_puts(m,
+			 "  (each of the two breakdowns below sums to the total independently)\n");
+		mitosis_print_kv(m, "Total faults", f);
+		mitosis_print_group(m, "by access");
+		mitosis_print_sub2(m, "read", f - fw);
+		mitosis_print_sub2(m, "write", fw);
+		mitosis_print_group(m, "by fault type");
+		mitosis_print_sub2(m, "not-present (major/fill)", f - fp);
+		mitosis_print_sub2(m, "present (permission/minor)", fp);
+		mitosis_print_group(m, "by handling node  [cols = NUMA node]");
+		mitosis_print_node_header(m);
+		seq_printf(m, "    %-4s", "flts");
+		for (node = 0; node < NUMA_NODE_COUNT; node++)
+			seq_printf(m, " %7ld",
+				   atomic_long_read(&s->faults_node[node]));
+		seq_putc(m, '\n');
+	}
+
+	mitosis_print_section(m, "Page-table entry writes (pv_ops, all levels)");
+	mitosis_print_kv(m, "PGD entry writes",
+			 atomic_long_read(&s->pt_writes[MITOSIS_CACHE_PGD]));
+	mitosis_print_kv(m, "P4D entry writes",
+			 atomic_long_read(&s->pt_writes[MITOSIS_CACHE_P4D]));
+	mitosis_print_kv(m, "PUD entry writes",
+			 atomic_long_read(&s->pt_writes[MITOSIS_CACHE_PUD]));
+	mitosis_print_kv(m, "PMD entry writes",
+			 atomic_long_read(&s->pt_writes[MITOSIS_CACHE_PMD]));
+	mitosis_print_kv(m, "PTE entry writes",
+			 atomic_long_read(&s->pt_writes[MITOSIS_CACHE_PTE]));
 
 	mitosis_print_section(m, "TLB shootdowns (remote-CPU IPIs)");
 	mitosis_print_kv(m, "Total shootdowns",

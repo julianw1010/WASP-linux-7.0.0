@@ -6622,6 +6622,8 @@ vm_fault_t handle_mm_fault(struct vm_area_struct *vma, unsigned long address,
 
 	lru_gen_enter_fault(vma);
 
+	mitosis_stats_fault(mm, flags);
+
 	if (unlikely(is_vm_hugetlb_page(vma))) {
 		pr_emerg("MITOSIS: hugetlb fault attempted; hugetlb is disabled on this kernel\n");
 		BUG();
