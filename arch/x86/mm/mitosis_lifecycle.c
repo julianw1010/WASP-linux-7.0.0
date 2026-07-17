@@ -348,6 +348,8 @@ int mitosis_enable(struct mm_struct *mm)
 	if (!node_isset(base_node, nodes))
 		node_set(base_node, nodes);
 
+	mitosis_stats_attach(mm, base_node);
+
 	if (base_page->pt_replica)
 		mitosis_free_replica_chain(base_page, MITOSIS_CACHE_PGD, mitosis_pgd_alloc_order(), NULL);
 
@@ -385,8 +387,6 @@ int mitosis_enable(struct mm_struct *mm)
 	mitosis_link_page_replicas(pgd_pages, count);
 
 	smp_store_release(&mm->repl_pgd_enabled, true);
-
-	mitosis_stats_attach(mm, base_node);
 	for (i = 1; i < count; i++)
 		mitosis_pt_account_page(pgd_pages[i], MITOSIS_CACHE_PGD, 1);
 
