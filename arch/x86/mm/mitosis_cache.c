@@ -5,6 +5,7 @@
 #include <linux/page-flags.h>
 #include <asm/tlb.h>
 #include <asm/mitosis.h>
+#include <linux/mitosis_stats.h>
 
 struct mitosis_cache_head mitosis_cache[NUMA_NODE_COUNT] = {
 	[0 ... NUMA_NODE_COUNT - 1] = {
@@ -19,7 +20,11 @@ struct mitosis_cache_head mitosis_cache[NUMA_NODE_COUNT] = {
 
 static bool mitosis_cache_counted(struct mm_struct *owner_mm)
 {
-	return owner_mm && owner_mm->repl_pgd_enabled;
+	if (!owner_mm)
+		return false;
+	if (owner_mm->repl_pgd_enabled)
+		return true;
+	return owner_mm->mitosis_stats && owner_mm->mitosis_stats->ever_enabled;
 }
 
 bool mitosis_cache_push(struct page *page, int node, int level,
