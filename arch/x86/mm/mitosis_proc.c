@@ -243,9 +243,35 @@ static const struct proc_ops mitosis_status_ops = {
 	.proc_release	= seq_release,
 };
 
+static ssize_t mitosis_history_write(struct file *file, const char __user *ubuf,
+				     size_t count, loff_t *ppos)
+{
+	char buf[32];
+	size_t len;
+	long val;
+	int freed;
+
+	len = min(count, sizeof(buf) - 1);
+	if (copy_from_user(buf, ubuf, len))
+		return -EFAULT;
+	buf[len] = '\0';
+
+	if (kstrtol(buf, 10, &val))
+		return -EINVAL;
+
+	if (val != -1)
+		return -EINVAL;
+
+	freed = mitosis_stats_clear_history();
+	pr_info("MITOSIS: history cleared %d records\n", freed);
+
+	return count;
+}
+
 static const struct proc_ops mitosis_history_ops = {
 	.proc_open	= mitosis_history_open,
 	.proc_read	= seq_read,
+	.proc_write	= mitosis_history_write,
 	.proc_lseek	= seq_lseek,
 	.proc_release	= seq_release,
 };
@@ -268,7 +294,7 @@ static int __init mitosis_proc_init(void)
 	if (!proc_create("status", 0444, mitosis_dir, &mitosis_status_ops))
 		goto fail;
 
-	if (!proc_create("history", 0444, mitosis_dir, &mitosis_history_ops))
+	if (!proc_create("history", 0644, mitosis_dir, &mitosis_history_ops))
 		goto fail;
 	return 0;
 

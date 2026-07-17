@@ -97,6 +97,22 @@ void mitosis_stats_retire(struct mm_struct *mm)
 	}
 }
 
+int mitosis_stats_clear_history(void)
+{
+	struct mitosis_stats *s, *tmp;
+	int freed = 0;
+
+	spin_lock(&mitosis_stats_lock);
+	list_for_each_entry_safe(s, tmp, &mitosis_hist_list, list) {
+		list_del(&s->list);
+		kfree(s);
+		freed++;
+	}
+	spin_unlock(&mitosis_stats_lock);
+
+	return freed;
+}
+
 static void mitosis_bump_max(atomic_long_t *maxp, long cur)
 {
 	long mx = atomic_long_read(maxp);
