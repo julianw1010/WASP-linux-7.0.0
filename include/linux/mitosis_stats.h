@@ -50,6 +50,7 @@ void mitosis_stats_publish(struct mm_struct *mm);
 void mitosis_stats_retire(struct mm_struct *mm);
 void mitosis_stats_fault(struct mm_struct *mm, unsigned int flags);
 void mitosis_stats_pt_write(void *tablep, int level);
+void mitosis_stats_pt_pages(void *tablep, int level, long pages);
 int mitosis_stats_clear_history(void);
 int mitosis_status_open(struct inode *inode, struct file *file);
 int mitosis_history_open(struct inode *inode, struct file *file);

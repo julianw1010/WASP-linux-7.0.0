@@ -155,23 +155,10 @@ void mitosis_stats_fault(struct mm_struct *mm, unsigned int flags)
 
 static bool mitosis_stats_ready __read_mostly;
 
-static long mitosis_ring_len(struct page *base)
-{
-	struct page *cur = base->pt_replica;
-	long n = 1;
-
-	while (cur && cur != base) {
-		n++;
-		cur = cur->pt_replica;
-	}
-	return n;
-}
-
 void mitosis_stats_pt_write(void *tablep, int level)
 {
 	struct mm_struct *mm;
 	struct mitosis_stats *s;
-	struct page *base;
 
 	if (!READ_ONCE(mitosis_stats_ready))
 		return;
@@ -180,16 +167,34 @@ void mitosis_stats_pt_write(void *tablep, int level)
 	if (!virt_addr_valid(tablep))
 		return;
 
-	base = virt_to_page(tablep);
-	mm = READ_ONCE(base->pt_owner_mm);
+	mm = READ_ONCE(virt_to_page(tablep)->pt_owner_mm);
 	if (!mm)
 		return;
 
 	s = mm->mitosis_stats;
-	if (s) {
+	if (s)
 		atomic_long_inc(&s->pt_writes[level]);
-		atomic_long_add(mitosis_ring_len(base), &s->pt_pages[level]);
-	}
+}
+
+void mitosis_stats_pt_pages(void *tablep, int level, long pages)
+{
+	struct mm_struct *mm;
+	struct mitosis_stats *s;
+
+	if (!READ_ONCE(mitosis_stats_ready))
+		return;
+	if (level < 0 || level >= MITOSIS_PT_NR_LEVELS)
+		return;
+	if (!virt_addr_valid(tablep))
+		return;
+
+	mm = READ_ONCE(virt_to_page(tablep)->pt_owner_mm);
+	if (!mm)
+		return;
+
+	s = mm->mitosis_stats;
+	if (s)
+		atomic_long_add(pages, &s->pt_pages[level]);
 }
 
 static int __init mitosis_stats_init(void)
