@@ -29,6 +29,9 @@ struct mitosis_stats {
 
 	atomic_long_t pt_writes[MITOSIS_PT_NR_LEVELS];
 
+	atomic_long_t set_calls[MITOSIS_PT_NR_LEVELS];
+	atomic_long_t set_pages[MITOSIS_PT_NR_LEVELS];
+
 	unsigned long start_jiffies;
 	unsigned long end_jiffies;
 
@@ -49,6 +52,7 @@ void mitosis_stats_publish(struct mm_struct *mm);
 void mitosis_stats_retire(struct mm_struct *mm);
 void mitosis_stats_fault(struct mm_struct *mm, unsigned int flags);
 void mitosis_stats_pt_write(void *tablep, int level);
+void mitosis_stats_set_fanout(void *tablep, int level, long pages);
 int mitosis_stats_clear_history(void);
 int mitosis_status_open(struct inode *inode, struct file *file);
 int mitosis_history_open(struct inode *inode, struct file *file);
