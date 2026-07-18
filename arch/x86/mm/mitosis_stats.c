@@ -155,10 +155,23 @@ void mitosis_stats_fault(struct mm_struct *mm, unsigned int flags)
 
 static bool mitosis_stats_ready __read_mostly;
 
+static long mitosis_ring_len(struct page *base)
+{
+	struct page *cur = base->pt_replica;
+	long n = 1;
+
+	while (cur && cur != base) {
+		n++;
+		cur = cur->pt_replica;
+	}
+	return n;
+}
+
 void mitosis_stats_pt_write(void *tablep, int level)
 {
 	struct mm_struct *mm;
 	struct mitosis_stats *s;
+	struct page *base;
 
 	if (!READ_ONCE(mitosis_stats_ready))
 		return;
@@ -167,35 +180,15 @@ void mitosis_stats_pt_write(void *tablep, int level)
 	if (!virt_addr_valid(tablep))
 		return;
 
-	mm = READ_ONCE(virt_to_page(tablep)->pt_owner_mm);
-	if (!mm)
-		return;
-
-	s = mm->mitosis_stats;
-	if (s)
-		atomic_long_inc(&s->pt_writes[level]);
-}
-
-void mitosis_stats_set_fanout(void *tablep, int level, long pages)
-{
-	struct mm_struct *mm;
-	struct mitosis_stats *s;
-
-	if (!READ_ONCE(mitosis_stats_ready))
-		return;
-	if (level < 0 || level >= MITOSIS_PT_NR_LEVELS)
-		return;
-	if (!virt_addr_valid(tablep))
-		return;
-
-	mm = READ_ONCE(virt_to_page(tablep)->pt_owner_mm);
+	base = virt_to_page(tablep);
+	mm = READ_ONCE(base->pt_owner_mm);
 	if (!mm)
 		return;
 
 	s = mm->mitosis_stats;
 	if (s) {
-		atomic_long_inc(&s->set_calls[level]);
-		atomic_long_add(pages, &s->set_pages[level]);
+		atomic_long_inc(&s->pt_writes[level]);
+		atomic_long_add(mitosis_ring_len(base), &s->pt_pages[level]);
 	}
 }
 
@@ -367,34 +360,24 @@ static void mitosis_stats_print(struct seq_file *m, struct mitosis_stats *s,
 		seq_putc(m, '\n');
 	}
 
-	mitosis_print_section(m, "Page-table entry writes (pv_ops, all levels)");
-	mitosis_print_kv(m, "PGD entry writes",
-			 atomic_long_read(&s->pt_writes[MITOSIS_CACHE_PGD]));
-	mitosis_print_kv(m, "P4D entry writes",
-			 atomic_long_read(&s->pt_writes[MITOSIS_CACHE_P4D]));
-	mitosis_print_kv(m, "PUD entry writes",
-			 atomic_long_read(&s->pt_writes[MITOSIS_CACHE_PUD]));
-	mitosis_print_kv(m, "PMD entry writes",
-			 atomic_long_read(&s->pt_writes[MITOSIS_CACHE_PMD]));
-	mitosis_print_kv(m, "PTE entry writes",
-			 atomic_long_read(&s->pt_writes[MITOSIS_CACHE_PTE]));
-
 	{
 		char buf[24];
 		int lvl;
 
 		mitosis_print_section(m,
-			"Setter fan-out: replica pages written per set_* call  [rows = level]");
-		seq_printf(m, "      %-6s %12s %14s %16s\n",
-			   "level", "calls", "pages", "avg pages/call");
+			"Page-table entry modifications + replica fan-out (all ops)  [rows = level]");
+		seq_puts(m,
+			 "  (writes = set/clear/wrprotect/young calls; pages = replica table pages touched)\n");
+		seq_printf(m, "      %-6s %14s %14s %16s\n",
+			   "level", "writes", "pages", "avg pages/write");
 		for (lvl = MITOSIS_CACHE_PGD; lvl >= MITOSIS_CACHE_PTE; lvl--) {
-			long calls = atomic_long_read(&s->set_calls[lvl]);
-			long pages = atomic_long_read(&s->set_pages[lvl]);
-			long h = calls ? (pages * 100 + calls / 2) / calls : 0;
+			long writes = atomic_long_read(&s->pt_writes[lvl]);
+			long pages = atomic_long_read(&s->pt_pages[lvl]);
+			long h = writes ? (pages * 100 + writes / 2) / writes : 0;
 
 			scnprintf(buf, sizeof(buf), "%ld.%02ld", h / 100, h % 100);
-			seq_printf(m, "      %-6s %12ld %14ld %16s\n",
-				   mitosis_level_name[lvl], calls, pages, buf);
+			seq_printf(m, "      %-6s %14ld %14ld %16s\n",
+				   mitosis_level_name[lvl], writes, pages, buf);
 		}
 	}
 
